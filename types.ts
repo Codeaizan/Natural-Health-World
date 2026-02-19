@@ -93,6 +93,8 @@ export interface BillItem {
   mrp: number;
   rate: number;
   amount: number;
+  discount?: number; // Discount in % applied during billing
+  discountedAmount?: number; // Amount after discount
   batchNumber?: string;
   expiryDate?: string;
 }
@@ -123,6 +125,9 @@ export interface Bill {
 export interface CartItem extends Product {
   quantity: number;
   totalAmount: number;
+  discount?: number; // Discount % applied during billing
+  discountedAmount?: number; // Amount after discount
+  expiryDate?: string; // Overridable expiry date for this bill
 }
 
 export interface StockHistory {

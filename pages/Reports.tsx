@@ -13,8 +13,21 @@ import {
 
 const Reports: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'sales' | 'products' | 'gst' | 'staff' | 'customers' | 'stock'>('sales');
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
+    
+    // Initialize dates with current month range (using local time, not UTC)
+    const getDefaultDates = () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const firstDay = `${year}-${month}-01`;
+        const endDay = `${year}-${month}-${day}`;
+        return { firstDay, endDay };
+    };
+    
+    const { firstDay, endDay } = getDefaultDates();
+    const [startDate, setStartDate] = useState(firstDay);
+    const [endDate, setEndDate] = useState(endDay);
     const [selectedSalesPerson, setSelectedSalesPerson] = useState<string>('all');
 
     // Data State
@@ -24,21 +37,30 @@ const Reports: React.FC = () => {
     const [stockHistory, setStockHistory] = useState<StockHistory[]>([]);
 
     useEffect(() => {
-        setAllBills(StorageService.getBills());
-        setProducts(StorageService.getProducts());
-        setSalesPersons(StorageService.getSalesPersons());
-        setStockHistory(StorageService.getStockHistory());
-        
-        // Default: This Month
-        const now = new Date();
-        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-        setStartDate(firstDay);
-        setEndDate(now.toISOString().split('T')[0]);
+        const loadAll = () => {
+            setAllBills(StorageService.getBills());
+            setProducts(StorageService.getProducts());
+            setSalesPersons(StorageService.getSalesPersons());
+            setStockHistory(StorageService.getStockHistory());
+        };
+
+        loadAll();
+
+        // Subscribe to storage changes so reports refresh when data mutates elsewhere
+        const onChange = () => loadAll();
+        if ((StorageService as any).addChangeListener) {
+            (StorageService as any).addChangeListener(onChange);
+        }
+
+        return () => {
+            if ((StorageService as any).removeChangeListener) {
+                (StorageService as any).removeChangeListener(onChange);
+            }
+        };
     }, []);
 
     // --- Derived Data (Filtered) ---
     const filteredBills = useMemo(() => {
-        if (!startDate || !endDate) return allBills;
         const start = new Date(startDate).getTime();
         const end = new Date(endDate).setHours(23, 59, 59, 999);
         return allBills.filter(b => {

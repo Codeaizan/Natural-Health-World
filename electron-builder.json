@@ -1,0 +1,25 @@
+{
+  "appId": "com.naturalhealthworld.bms",
+  "productName": "Natural Health World BMS",
+  "files": [
+    "dist/**/*",
+    "electron.cjs",
+    "preload.cjs",
+    "node_modules/**/*"
+  ],
+  "directories": {
+    "buildResources": "assets"
+  },
+  "extraResources": [
+    {
+      "from": "node_modules/@ffmpeg-installer/win32-x64/ffmpeg.exe",
+      "to": "ffmpeg.exe"
+    }
+  ],
+  "win": {
+    "target": [
+      "portable"
+    ],
+    "forceCodeSigning": false
+  }
+}

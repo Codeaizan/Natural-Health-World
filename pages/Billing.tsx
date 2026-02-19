@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StorageService } from '../services/storage';
 import { Product, Customer, SalesPerson, CartItem, Bill, BillItem } from '../types';
 import { COLORS } from '../constants';
-import { Search, Plus, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, MapPin } from 'lucide-react';
+import { Search, Plus, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, MapPin, Download } from 'lucide-react';
 import { searchMatch, numberToWords } from '../utils';
+import html2pdf from 'html2pdf.js';
 
 const Billing: React.FC = () => {
   // State
@@ -25,6 +26,9 @@ const Billing: React.FC = () => {
 
   const [lastBill, setLastBill] = useState<Bill | null>(null);
 
+  // Ref for PDF download
+  const printableRef = useRef<HTMLDivElement>(null);
+
   // New Customer Modal State
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({});
@@ -34,6 +38,13 @@ const Billing: React.FC = () => {
     setCustomers(StorageService.getCustomers());
     setSalesPersons(StorageService.getSalesPersons());
   }, []);
+
+  // Auto-download bill as PDF when it's created
+  useEffect(() => {
+    if (lastBill) {
+      downloadBillAsPDF(lastBill);
+    }
+  }, [lastBill?.id]); // Trigger only when bill ID changes
 
   // -- Handlers --
 
@@ -69,10 +80,72 @@ const Billing: React.FC = () => {
     setCart(cart.filter(item => item.id !== id));
   };
 
+  const updateCartItemDiscount = (id: number, discount: number) => {
+    setCart(cart.map(item => 
+      item.id === id 
+        ? { ...item, discount: Math.max(0, Math.min(100, discount)) }
+        : item
+    ));
+  };
+
+  const updateCartItemExpiry = (id: number, expiryDate: string) => {
+    setCart(cart.map(item =>
+      item.id === id
+        ? { ...item, expiryDate }
+        : item
+    ));
+  };
+
   const clearCart = () => {
       if (cart.length > 0 && window.confirm("Are you sure you want to clear the cart?")) {
           setCart([]);
       }
+  };
+
+  const downloadBillAsPDF = (bill: Bill) => {
+    // Wait a tick for DOM to update, then capture
+    setTimeout(() => {
+      const element = printableRef.current;
+      if (!element) {
+        alert('Bill not ready for download');
+        return;
+      }
+
+      const opt = {
+        margin: 5,
+        filename: `${bill.invoiceNumber}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+      };
+
+      // Check if running in Electron
+      const electronAPI = (window as any).electron;
+      if (electronAPI) {
+        // Save via Electron to Desktop/invoices
+        html2pdf()
+          .set(opt)
+          .from(element)
+          .outputPdf('blob')
+          .then((blob: Blob) => {
+            const reader = new FileReader();
+            reader.onload = async () => {
+              const arrayBuffer = reader.result as ArrayBuffer;
+              const result = await electronAPI.savePdfBlob(`${bill.invoiceNumber}.pdf`, arrayBuffer);
+              if (result.success) {
+                console.log(`✓ Bill saved to Desktop/invoices/${bill.invoiceNumber}.pdf`);
+              } else {
+                console.error('Failed to save bill:', result.error);
+                alert('Failed to save bill: ' + result.error);
+              }
+            };
+            reader.readAsArrayBuffer(blob);
+          });
+      } else {
+        // Fallback: Browser download
+        html2pdf().set(opt).from(element).save();
+      }
+    }, 100);
   };
 
   const handleAddNewCustomer = (e: React.FormEvent) => {
@@ -135,10 +208,14 @@ const Billing: React.FC = () => {
     }
 
     cart.forEach(item => {
-        const itemTaxable = item.sellingPrice * item.quantity;
-        taxable += itemTaxable;
+        let itemAmount = item.sellingPrice * item.quantity;
+        // Apply discount if present
+        if (item.discount && item.discount > 0) {
+            itemAmount = itemAmount * (1 - item.discount / 100);
+        }
+        taxable += itemAmount;
         if(isGstBill) {
-            const taxAmount = itemTaxable * (item.gstRate / 100);
+            const taxAmount = itemAmount * (item.gstRate / 100);
             totalTax += taxAmount;
         }
     });
@@ -187,17 +264,24 @@ const Billing: React.FC = () => {
         return;
     }
 
-    const billItems: BillItem[] = cart.map(item => ({
-        productId: item.id,
-        productName: item.name,
-        hsnCode: item.hsnCode,
-        quantity: item.quantity,
-        mrp: item.mrp,
-        rate: item.sellingPrice,
-        amount: item.totalAmount,
-        batchNumber: item.batchNumber,
-        expiryDate: item.expiryDate
-    }));
+    const billItems: BillItem[] = cart.map(item => {
+        const baseAmount = item.sellingPrice * item.quantity;
+        const discount = item.discount || 0;
+        const discountedAmount = baseAmount * (1 - discount / 100);
+        return {
+            productId: item.id,
+            productName: item.name,
+            hsnCode: item.hsnCode,
+            quantity: item.quantity,
+            mrp: item.mrp,
+            rate: item.sellingPrice,
+            amount: baseAmount,
+            discount: discount > 0 ? discount : undefined,
+            discountedAmount: discount > 0 ? discountedAmount : undefined,
+            batchNumber: item.batchNumber,
+            expiryDate: item.expiryDate || ''
+        };
+    });
 
     const newBill: Bill = {
         id: 0,
@@ -244,7 +328,7 @@ const Billing: React.FC = () => {
           ];
 
       return (
-          <div id="printable-area" className="p-8 bg-white text-gray-800 text-sm font-sans relative min-h-[1000px] flex flex-col">
+          <div ref={printableRef} id="printable-area" className="p-8 bg-white text-gray-800 text-sm font-sans relative min-h-[1000px] flex flex-col">
             {/* Header */}
             <div className="flex justify-between items-start border-b-2 border-gray-800 pb-4 mb-4">
                 <div className="flex gap-4">
@@ -280,10 +364,6 @@ const Billing: React.FC = () => {
                     <div className="mt-2">
                         <p className="text-gray-500 text-xs uppercase">Date</p>
                         <p className="font-bold">{new Date(bill.date).toLocaleDateString()}</p>
-                    </div>
-                    <div className="mt-2">
-                         <p className="text-gray-500 text-xs uppercase">Sales Rep</p>
-                         <p className="font-bold">{bill.salesPersonName}</p>
                     </div>
                      <div className="mt-4 p-2 bg-gray-50 rounded border text-xs text-left">
                         <p><span className="font-semibold">GSTIN:</span> {settings.gstin}</p>
@@ -335,6 +415,7 @@ const Billing: React.FC = () => {
                             <th className="py-2 px-2 text-left w-24">Batch/Exp</th>
                             <th className="py-2 px-2 text-right w-16">Qty</th>
                             <th className="py-2 px-2 text-right w-20">Rate</th>
+                            <th className="py-2 px-2 text-right w-16">Discount</th>
                             <th className="py-2 px-2 text-right w-24">Amount</th>
                         </tr>
                     </thead>
@@ -352,7 +433,8 @@ const Billing: React.FC = () => {
                                 </td>
                                 <td className="py-2 px-2 text-right font-bold">{item.quantity}</td>
                                 <td className="py-2 px-2 text-right">{item.rate.toFixed(2)}</td>
-                                <td className="py-2 px-2 text-right font-bold">{item.amount.toFixed(2)}</td>
+                                <td className="py-2 px-2 text-right">{item.discount ? `${item.discount.toFixed(0)}%` : '-'}</td>
+                                <td className="py-2 px-2 text-right font-bold">{(item.discountedAmount || item.amount).toFixed(2)}</td>
                             </tr>
                         ))}
                     </tbody>
@@ -511,26 +593,51 @@ const Billing: React.FC = () => {
                         <th className="p-3">Product</th>
                         <th className="p-3 text-right">Price</th>
                         <th className="p-3 text-center">Qty</th>
+                        <th className="p-3 text-right">Discount %</th>
                         <th className="p-3 text-right">Total</th>
+                        <th className="p-3">Expiry</th>
                         <th className="p-3 w-10"></th>
                     </tr>
                 </thead>
                 <tbody className="divide-y">
-                    {cart.map((item, idx) => (
+                    {cart.map((item, idx) => {
+                        const baseAmount = item.sellingPrice * item.quantity;
+                        const discount = item.discount || 0;
+                        const discountedAmount = baseAmount * (1 - discount / 100);
+                        return (
                         <tr key={idx}>
                             <td className="p-3">{item.name}</td>
                             <td className="p-3 text-right">₹{item.sellingPrice}</td>
                             <td className="p-3 text-center">{item.quantity}</td>
-                            <td className="p-3 text-right">₹{item.totalAmount.toFixed(2)}</td>
+                            <td className="p-3 px-2">
+                                <input 
+                                    type="number" 
+                                    min="0" 
+                                    max="100" 
+                                    value={discount}
+                                    onChange={(e) => updateCartItemDiscount(item.id, parseFloat(e.target.value) || 0)}
+                                    className="w-16 px-2 py-1 border rounded text-sm text-center bg-blue-50 focus:ring-2 focus:ring-blue-400 outline-none"
+                                />
+                            </td>
+                            <td className={`p-3 text-right ${discount > 0 ? 'font-bold text-green-700' : ''}`}>₹{discountedAmount.toFixed(2)}</td>
+                            <td className="p-3">
+                                <input 
+                                    type="date" 
+                                    value={item.expiryDate || ''}
+                                    onChange={(e) => updateCartItemExpiry(item.id, e.target.value)}
+                                    className="px-2 py-1 border rounded text-sm bg-green-50 focus:ring-2 focus:ring-green-400 outline-none"
+                                />
+                            </td>
                             <td className="p-3 text-center">
                                 <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-700">
                                     <Trash2 size={16} />
                                 </button>
                             </td>
                         </tr>
-                    ))}
+                    );
+                    })}
                     {cart.length === 0 && (
-                        <tr><td colSpan={5} className="p-8 text-center text-gray-400">Cart is empty</td></tr>
+                        <tr><td colSpan={7} className="p-8 text-center text-gray-400">Cart is empty</td></tr>
                     )}
                 </tbody>
             </table>
@@ -708,6 +815,12 @@ const Billing: React.FC = () => {
                             className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
                         >
                             <Printer size={18} className="mr-2" /> Print / Save PDF
+                        </button>
+                        <button 
+                            onClick={() => lastBill && downloadBillAsPDF(lastBill)} 
+                            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                        >
+                            <Download size={18} className="mr-2" /> Download PDF
                         </button>
                         <button 
                             onClick={() => setLastBill(null)} 

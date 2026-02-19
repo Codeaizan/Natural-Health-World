@@ -26,6 +26,14 @@ const save = <T>(key: string, data: T): void => {
   localStorage.setItem(key, JSON.stringify(data));
 };
 
+// --- Change notification (simple observer) ---
+const _listeners = new Set<(type?: string) => void>();
+const notifyChange = (type?: string) => {
+  _listeners.forEach(cb => {
+    try { cb(type); } catch (e) { /* ignore listener errors */ }
+  });
+};
+
 // Simple Hash for "bcrypt-like" behavior (Browser compatible)
 const hashPassword = async (password: string): Promise<string> => {
     const msgBuffer = new TextEncoder().encode(password);
@@ -35,6 +43,8 @@ const hashPassword = async (password: string): Promise<string> => {
 };
 
 export const StorageService = {
+  addChangeListener: (cb: (type?: string) => void) => _listeners.add(cb),
+  removeChangeListener: (cb: (type?: string) => void) => _listeners.delete(cb),
   // --- Settings ---
   getSettings: (): CompanySettings => load(DB_KEYS.SETTINGS, DEFAULT_SETTINGS),
   saveSettings: (settings: CompanySettings) => save(DB_KEYS.SETTINGS, settings),
@@ -100,11 +110,13 @@ export const StorageService = {
       if (idx !== -1) list[idx] = product;
     }
     save(DB_KEYS.PRODUCTS, list);
+    notifyChange('products');
   },
   deleteProduct: (id: number) => {
     let list = load<Product[]>(DB_KEYS.PRODUCTS, []);
     list = list.filter(p => p.id !== id);
     save(DB_KEYS.PRODUCTS, list);
+    notifyChange('products');
   },
   
   // --- Stock Logic ---
@@ -135,6 +147,7 @@ export const StorageService = {
       });
       if (history.length > 1000) history.length = 1000;
       save(DB_KEYS.STOCK_HISTORY, history);
+        notifyChange('stock');
   },
 
   getStockHistory: (): StockHistory[] => load(DB_KEYS.STOCK_HISTORY, []),
@@ -151,6 +164,7 @@ export const StorageService = {
       if (idx !== -1) list[idx] = customer;
     }
     save(DB_KEYS.CUSTOMERS, list);
+    notifyChange('customers');
   },
   mergeCustomers: (fromId: number, toId: number) => {
       const bills = load<Bill[]>(DB_KEYS.BILLS, []);
@@ -171,9 +185,11 @@ export const StorageService = {
           }
       });
       if (updatedBills) save(DB_KEYS.BILLS, bills);
+      if (updatedBills) notifyChange('bills');
 
       const newCustomers = customers.filter(c => c.id !== fromId);
       save(DB_KEYS.CUSTOMERS, newCustomers);
+        notifyChange('customers');
   },
 
   // --- Bills ---
@@ -183,6 +199,8 @@ export const StorageService = {
     bill.id = Date.now();
     list.push(bill);
     save(DB_KEYS.BILLS, list);
+
+    notifyChange('bills');
 
     bill.items.forEach(item => {
         // deduct stock (negative change)
@@ -242,6 +260,7 @@ export const StorageService = {
         if(idx !== -1) list[idx] = person;
     }
     save(DB_KEYS.SALES_PERSONS, list);
+    notifyChange('salesPersons');
   },
 
   // --- Backups ---
