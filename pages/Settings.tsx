@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { StorageService } from '../services/storage';
 import { CompanySettings, SalesPerson, User } from '../types';
 import { COLORS } from '../constants';
+import { DEFAULT_SETTINGS } from '../constants';
 import { Save, Plus, Trash2, Shield, CreditCard, FileText, Database, Upload, Lock, User as UserIcon, Download } from 'lucide-react';
+import { db } from '../services/db';
 
 const Settings: React.FC = () => {
-  const [settings, setSettings] = useState<CompanySettings>(StorageService.getSettings());
+  const [settings, setSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [newSPName, setNewSPName] = useState('');
@@ -22,14 +24,21 @@ const Settings: React.FC = () => {
   const [backupStatus, setBackupStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
 
   useEffect(() => {
-      setSalesPersons(StorageService.getSalesPersons());
-      setUsers(StorageService.getUsers());
+      const loadData = async () => {
+        const settingsData = await StorageService.getSettings();
+        const sp = await StorageService.getSalesPersons();
+        const u = await StorageService.getUsers();
+        setSettings(settingsData);
+        setSalesPersons(sp);
+        setUsers(u);
+      };
+      loadData();
   }, []);
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
       e.preventDefault();
       try {
-          StorageService.saveSettings(settings);
+          await StorageService.saveSettings(settings);
           alert('Settings saved successfully!');
       } catch (err) {
           alert('Failed to save settings. Storage might be full.');
@@ -78,16 +87,18 @@ const Settings: React.FC = () => {
       reader.readAsDataURL(file);
   };
 
-  const addSalesPerson = () => {
+  const addSalesPerson = async () => {
       if (!newSPName.trim()) return;
-      StorageService.saveSalesPerson({ id: 0, name: newSPName, isActive: true });
-      setSalesPersons(StorageService.getSalesPersons());
+      await StorageService.saveSalesPerson({ id: 0, name: newSPName, isActive: true });
+      const sp = await StorageService.getSalesPersons();
+      setSalesPersons(sp);
       setNewSPName('');
   };
 
-  const toggleSalesPerson = (sp: SalesPerson) => {
-      StorageService.saveSalesPerson({ ...sp, isActive: !sp.isActive });
-      setSalesPersons(StorageService.getSalesPersons());
+  const toggleSalesPerson = async (sp: SalesPerson) => {
+      await StorageService.saveSalesPerson({ ...sp, isActive: !sp.isActive });
+      const updated = await StorageService.getSalesPersons();
+      setSalesPersons(updated);
   };
 
   const handleUpdateUser = async (e: React.FormEvent) => {
@@ -108,27 +119,42 @@ const Settings: React.FC = () => {
           role: 'admin', // Simple role for now
       };
       
-      StorageService.saveUser(user);
-      setUsers(StorageService.getUsers());
+      await StorageService.saveUser(user);
+      const u = await StorageService.getUsers();
+      setUsers(u);
       setNewUsername('');
       setNewPassword('');
       setConfirmPassword('');
       alert("User updated/created successfully");
   };
 
-  const clearData = () => {
+  const clearData = async () => {
       if (window.confirm("CRITICAL WARNING: This will delete ALL bills, customers, and products. Are you sure?")) {
           if(window.prompt("Type 'DELETE' to confirm") === 'DELETE') {
-             localStorage.clear();
-             window.location.reload();
+             try {
+                 // Clear IndexedDB tables (the actual data store)
+                 await db.products.clear();
+                 await db.customers.clear();
+                 await db.bills.clear();
+                 await db.salesPersons.clear();
+                 await db.stockHistory.clear();
+                 await db.backups.clear();
+                 // Also clear any localStorage remnants
+                 localStorage.clear();
+                 alert('All data cleared successfully. Page will reload.');
+                 window.location.reload();
+             } catch (err) {
+                 console.error('Failed to clear data:', err);
+                 alert('Failed to clear data: ' + (err as Error).message);
+             }
           }
       }
   };
 
-  const handleBackupDownload = () => {
+  const handleBackupDownload = async () => {
       try {
           setBackupStatus({ status: 'loading' });
-          const backupContent = StorageService.exportBackupFile();
+          const backupContent = await StorageService.exportBackupFile();
           const element = document.createElement('a');
           const file = new Blob([backupContent], { type: 'application/json' });
           element.href = URL.createObjectURL(file);
@@ -157,11 +183,11 @@ const Settings: React.FC = () => {
 
       setBackupStatus({ status: 'loading' });
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
           try {
               if (evt.target?.result) {
                   const jsonContent = evt.target.result as string;
-                  const result = StorageService.importBackupFile(jsonContent);
+                  const result = await StorageService.importBackupFile(jsonContent);
                   if (result.success) {
                       setBackupStatus({ status: 'success', message: result.message });
                       setTimeout(() => {
@@ -195,7 +221,7 @@ const Settings: React.FC = () => {
           <Shield className="mr-3 text-green-700" /> System Settings
       </h2>
 
-      <div className="flex gap-2 mb-6 border-b overflow-x-auto">
+      <div className="flex gap-2 mb-6 border-b border-gray-200 overflow-x-auto">
           {['company', 'billing', 'sales', 'users', 'data'].map(tab => (
               <button
                 key={tab}

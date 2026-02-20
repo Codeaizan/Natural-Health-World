@@ -19,7 +19,9 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
     
     try {
+        console.log('Login attempt:', username);
         const user = await StorageService.verifyCredentials(username, password);
+        console.log('Login result:', user);
         if (user) {
             sessionStorage.setItem('nhw_user', username);
             onLogin();
@@ -27,6 +29,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             setError('Invalid username or password');
         }
     } catch (err) {
+        console.error('Login error:', err);
         setError('Login failed. Please try again.');
     } finally {
         setLoading(false);

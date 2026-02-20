@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StorageService } from '../services/storage';
-import { Product, Customer, SalesPerson, CartItem, Bill, BillItem } from '../types';
+import { Product, Customer, SalesPerson, CartItem, Bill, BillItem, CompanySettings } from '../types';
 import { COLORS } from '../constants';
 import { Search, Plus, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, MapPin, Download } from 'lucide-react';
 import { searchMatch, numberToWords } from '../utils';
@@ -11,6 +11,7 @@ const Billing: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
+  const [settings, setSettings] = useState<CompanySettings | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   
   // Selection
@@ -34,9 +35,17 @@ const Billing: React.FC = () => {
   const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({});
 
   useEffect(() => {
-    setProducts(StorageService.getProducts());
-    setCustomers(StorageService.getCustomers());
-    setSalesPersons(StorageService.getSalesPersons());
+    const loadData = async () => {
+      const productsData = await StorageService.getProducts();
+      const customersData = await StorageService.getCustomers();
+      const salespersonsData = await StorageService.getSalesPersons();
+      const settingsData = await StorageService.getSettings();
+      setProducts(productsData);
+      setCustomers(customersData);
+      setSalesPersons(salespersonsData);
+      setSettings(settingsData);
+    };
+    loadData();
   }, []);
 
   // Bills are now managed in the Invoices page - auto-download removed
@@ -143,7 +152,7 @@ const Billing: React.FC = () => {
     }, 100);
   };
 
-  const handleAddNewCustomer = (e: React.FormEvent) => {
+  const handleAddNewCustomer = async (e: React.FormEvent) => {
       e.preventDefault();
       if(!newCustomer.name || !newCustomer.phone) {
           alert("Name and Phone are required");
@@ -167,10 +176,10 @@ const Billing: React.FC = () => {
           gstin: newCustomer.gstin || ''
       };
       
-      StorageService.saveCustomer(customer);
+      await StorageService.saveCustomer(customer);
       
       // Refresh list and auto-select
-      const updatedList = StorageService.getCustomers();
+      const updatedList = await StorageService.getCustomers();
       setCustomers(updatedList);
       // Find the newly added customer (highest ID)
       const added = updatedList.reduce((prev, current) => (prev.id > current.id) ? prev : current);
@@ -185,7 +194,7 @@ const Billing: React.FC = () => {
   // -- Calculations --
   
   const calculateBillTotals = () => {
-    const settings = StorageService.getSettings();
+    if (!settings) return { taxable: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, roundOff: 0, grandTotal: 0, isInterState: false };
     let taxable = 0;
     let totalTax = 0;
     
@@ -235,8 +244,12 @@ const Billing: React.FC = () => {
 
   const totals = calculateBillTotals();
 
-  const handleGenerateBill = () => {
+  const handleGenerateBill = async () => {
     if (cart.length === 0) return;
+    if (!settings) {
+        alert('Settings not loaded yet. Please wait and try again.');
+        return;
+    }
     if (!selectedCustomer) {
         alert('Please select a customer');
         return;
@@ -278,9 +291,10 @@ const Billing: React.FC = () => {
         };
     });
 
+    const invoiceNumber = await StorageService.getNextInvoiceNumber();
     const newBill: Bill = {
         id: 0,
-        invoiceNumber: StorageService.getNextInvoiceNumber(),
+        invoiceNumber,
         date: new Date().toISOString(),
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.name,
@@ -301,18 +315,31 @@ const Billing: React.FC = () => {
         items: billItems
     };
 
-    StorageService.saveBill(newBill);
+    await StorageService.saveBill(newBill);
     setLastBill(newBill);
     // Clear cart
     setCart([]);
     setSelectedCustomer(null);
     setCustomerSearch('');
     // Refresh products to update stock
-    setProducts(StorageService.getProducts());
+    const updatedProducts = await StorageService.getProducts();
+    setProducts(updatedProducts);
   };
 
   const InvoiceView = ({ bill }: { bill: Bill }) => {
-      const settings = StorageService.getSettings();
+      const [settings, setInvoiceSettings] = useState<CompanySettings | null>(null);
+      
+      React.useEffect(() => {
+        const loadSettings = async () => {
+          const data = await StorageService.getSettings();
+          setInvoiceSettings(data);
+        };
+        loadSettings();
+      }, []);
+
+      if (!settings) {
+        return <div className="p-4 text-center text-gray-500">Loading invoice...</div>;
+      }
       
       const termsList = settings.terms 
         ? settings.terms.split('\n').filter(t => t.trim() !== '') 
@@ -538,7 +565,7 @@ const Billing: React.FC = () => {
             <div className="flex-1 relative">
                 <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
                 <input 
-                    className="w-full pl-9 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                    className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                     placeholder="Search Product (Name, Batch)..."
                     value={productSearch}
                     onChange={(e) => {
@@ -675,7 +702,7 @@ const Billing: React.FC = () => {
             
             <div className="relative mb-3">
                 <input 
-                    className="w-full p-2 border rounded focus:ring-2 focus:ring-green-500 outline-none"
+                    className="w-full p-2 border border-gray-200 rounded focus:ring-2 focus:ring-green-500 outline-none"
                     placeholder="Search Customer (Name/Phone)..."
                     value={customerSearch}
                     onChange={(e) => {

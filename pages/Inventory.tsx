@@ -33,11 +33,12 @@ const Inventory: React.FC = () => {
     loadProducts();
   }, []);
 
-  const loadProducts = () => {
-    setProducts(StorageService.getProducts());
+  const loadProducts = async () => {
+    const productsData = await StorageService.getProducts();
+    setProducts(productsData);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentProduct.name || !currentProduct.mrp) return;
 
@@ -63,20 +64,20 @@ const Inventory: React.FC = () => {
       minStockLevel: Number(currentProduct.minStockLevel || 10),
     };
 
-    StorageService.saveProduct(newProduct);
-    loadProducts();
+    await StorageService.saveProduct(newProduct);
+    await loadProducts();
     setIsModalOpen(false);
     setCurrentProduct({});
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: number) => {
     if(window.confirm('Are you sure you want to delete this product?')) {
-        StorageService.deleteProduct(id);
-        loadProducts();
+        await StorageService.deleteProduct(id);
+        await loadProducts();
     }
   };
 
-  const handleStockAdjustment = (e: React.FormEvent) => {
+  const handleStockAdjustment = async (e: React.FormEvent) => {
       e.preventDefault();
       if(!stockProduct || stockQty <= 0) return;
       if(!stockNotes.trim()) {
@@ -101,19 +102,19 @@ const Inventory: React.FC = () => {
       if (stockReason === 'restock') historyReason = 'restock';
       else if (stockReason === 'return') historyReason = 'return';
       
-      StorageService.updateStock(
+      await StorageService.updateStock(
           stockProduct.id, 
           quantityChange, 
           historyReason, 
           stockNotes 
       );
 
-      loadProducts();
+      await loadProducts();
       setIsStockModalOpen(false);
       resetStockForm();
   };
 
-  const handleBulkUpdate = () => {
+  const handleBulkUpdate = async () => {
       if(!window.confirm(`Are you sure you want to apply this to ALL ${products.length} products?`)) return;
       
       const updatedProducts = products.map(p => {
@@ -129,8 +130,10 @@ const Inventory: React.FC = () => {
           }
       });
       
-      updatedProducts.forEach(p => StorageService.saveProduct(p));
-      loadProducts();
+      for (const p of updatedProducts) {
+        await StorageService.saveProduct(p);
+      }
+      await loadProducts();
       setIsBulkModalOpen(false);
       alert("Bulk update complete.");
   };
@@ -202,7 +205,7 @@ const Inventory: React.FC = () => {
       const file = e.target.files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = (evt) => {
+      reader.onload = async (evt) => {
           const text = evt.target?.result as string;
           try {
              const lines = text.split("\n").filter(l => l.trim());
@@ -237,7 +240,22 @@ const Inventory: React.FC = () => {
              const stockIdx = headers.findIndex(h => h.includes('stock') && !h.includes('min'));
              const minStockIdx = headers.findIndex(h => h.includes('min'));
              
+             // Ask user if they want to clear existing products first
+             const clearFirst = window.confirm(
+                 'Do you want to clear all existing products before importing?\n\n' +
+                 'Click "OK" to clear and import fresh\n' +
+                 'Click "Cancel" to merge with existing products'
+             );
+             
+             if (clearFirst) {
+                 await StorageService.deleteAllProducts();
+                 // Small delay to ensure database clear completes
+                 await new Promise(resolve => setTimeout(resolve, 100));
+             }
+             
              let count = 0;
+             let errors: string[] = [];
+             
              for(let i = 1; i < lines.length; i++) {
                  const cols = parseCSVLine(lines[i]).map(c => c.replace(/^"|"$/g, '').trim());
                  if(cols.length < 2) continue;
@@ -247,7 +265,10 @@ const Inventory: React.FC = () => {
                  const mrpStr = cols[mrpIdx] || '0';
                  const mprNum = parseFloat(mrpStr);
                  
-                 if (!name || isNaN(mprNum) || mprNum <= 0) continue;
+                 if (!name || isNaN(mprNum) || mprNum <= 0) {
+                     if (name) errors.push(`Row ${i}: Missing or invalid MRP for "${name}"`);
+                     continue;
+                 }
                  
                  // Extract package size if present, otherwise use empty
                  let packageSize = '';
@@ -279,15 +300,27 @@ const Inventory: React.FC = () => {
                      minStockLevel: minStockIdx >= 0 ? (parseFloat(cols[minStockIdx]) || 10) : 10,
                      sellingPrice: mprNum - (mprNum * ((discIdx >= 0 ? parseFloat(cols[discIdx]) : 0) || 0) / 100)
                  };
-                 StorageService.saveProduct(newP);
-                 count++;
+                 
+                 try {
+                     await StorageService.saveProduct(newP);
+                     count++;
+                 } catch (err) {
+                     const errMsg = (err as Error).message;
+                     errors.push(`Row ${i}: ${name} (${packageSize}) - ${errMsg.includes('duplicate') || errMsg.includes('unique') ? 'Duplicate product' : errMsg}`);
+                     console.error(`Failed to import row ${i}:`, err);
+                 }
              }
+             
              if (count === 0) {
                  alert("No valid products found. Please check CSV format.\n\nExpected columns: Product (or Name), MRP, and optionally: Package Size, Category, HSN, Unit, Batch, Expiry, Discount %, Purchase Price, GST %, Stock, Min Stock");
              } else {
-                 alert(`Imported ${count} products.`);
+                 let msg = `✓ Successfully imported ${count} products.`;
+                 if (errors.length > 0) {
+                     msg += `\n\n⚠ ${errors.length} rows failed:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n... and ' + (errors.length - 5) + ' more' : ''}`;
+                 }
+                 alert(msg);
              }
-             loadProducts();
+             await loadProducts();
           } catch (err) { console.error(err); alert("Failed to parse CSV: " + (err as Error).message); }
       };
       reader.readAsText(file);

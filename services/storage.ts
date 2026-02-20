@@ -1,30 +1,6 @@
 import { CompanySettings, Product, Customer, Bill, SalesPerson, StockHistory, BackupRecord, User } from '../types';
 import { DEFAULT_SETTINGS } from '../constants';
-
-const DB_KEYS = {
-  SETTINGS: 'nhw_settings',
-  PRODUCTS: 'nhw_products',
-  CUSTOMERS: 'nhw_customers',
-  BILLS: 'nhw_bills',
-  SALES_PERSONS: 'nhw_sales_persons',
-  STOCK_HISTORY: 'nhw_stock_history',
-  BACKUPS: 'nhw_backups',
-  USERS: 'nhw_users'
-};
-
-const load = <T>(key: string, defaultValue: T): T => {
-  const data = localStorage.getItem(key);
-  if (!data) return defaultValue;
-  try {
-    return JSON.parse(data);
-  } catch {
-    return defaultValue;
-  }
-};
-
-const save = <T>(key: string, data: T): void => {
-  localStorage.setItem(key, JSON.stringify(data));
-};
+import { db, setKeyValue, getKeyValue } from './db';
 
 // --- Change notification (simple observer) ---
 const _listeners = new Set<(type?: string) => void>();
@@ -36,93 +12,141 @@ const notifyChange = (type?: string) => {
 
 // Simple Hash for "bcrypt-like" behavior (Browser compatible)
 const hashPassword = async (password: string): Promise<string> => {
-    const msgBuffer = new TextEncoder().encode(password);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    try {
+        const msgBuffer = new TextEncoder().encode(password);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        console.log('Hash computed for password:', { password, hash });
+        return hash;
+    } catch (err) {
+        console.error('Hashing error:', err);
+        throw err;
+    }
 };
 
 export const StorageService = {
   addChangeListener: (cb: (type?: string) => void) => _listeners.add(cb),
   removeChangeListener: (cb: (type?: string) => void) => _listeners.delete(cb),
+  
   // --- Settings ---
-  getSettings: (): CompanySettings => load(DB_KEYS.SETTINGS, DEFAULT_SETTINGS),
-  saveSettings: (settings: CompanySettings) => save(DB_KEYS.SETTINGS, settings),
-
-  // --- Auth & Users ---
-  getUsers: (): User[] => {
-      const users = load<User[]>(DB_KEYS.USERS, []);
-      if (users.length === 0) {
-          // Default Admin (Password: admin123) - SHA256 hash
-          const defaultAdmin: User = {
-              username: 'admin',
-              passwordHash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 
-              role: 'admin'
-          };
-          save(DB_KEYS.USERS, [defaultAdmin]);
-          return [defaultAdmin];
-      }
-      return users;
+  getSettings: async (): Promise<CompanySettings> => {
+    const settings = await getKeyValue('nhw_settings', null);
+    return settings || DEFAULT_SETTINGS;
   },
   
-  saveUser: (user: User) => {
-      const users = StorageService.getUsers();
-      const existingIdx = users.findIndex(u => u.username === user.username);
-      if (existingIdx >= 0) {
-          users[existingIdx] = user;
-      } else {
-          users.push(user);
+  saveSettings: async (settings: CompanySettings): Promise<void> => {
+    await setKeyValue('nhw_settings', settings);
+    notifyChange('settings');
+  },
+
+  // --- Auth & Users ---
+  getUsers: async (): Promise<User[]> => {
+      try {
+          const users = await db.users.toArray();
+          console.log('Retrieved users from DB:', users);
+          if (users.length === 0) {
+              // Default Admin (Password: admin123) - SHA256 hash
+              const defaultAdmin: User = {
+                  username: 'admin',
+                  passwordHash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 
+                  role: 'admin'
+              };
+              try {
+                  await db.users.add(defaultAdmin);
+                  console.log('Default admin user added successfully');
+              } catch (e) {
+                  // User might already exist, try put instead
+                  console.log('Add failed, trying put:', e);
+                  await db.users.put(defaultAdmin);
+                  console.log('Default admin user saved via put');
+              }
+              return [defaultAdmin];
+          }
+          return users;
+      } catch (err) {
+          console.error('Error getting users:', err);
+          return [];
       }
-      save(DB_KEYS.USERS, users);
+  },
+  
+  saveUser: async (user: User) => {
+      await db.users.put(user);
+      notifyChange('users');
   },
 
   verifyCredentials: async (u: string, p: string): Promise<User | null> => {
-      const users = StorageService.getUsers();
-      const user = users.find(user => user.username === u);
-      if (!user) return null;
-      
-      const hash = await hashPassword(p);
-      if (user.passwordHash === hash) {
-          // Update last login
-          user.lastLogin = new Date().toISOString();
-          StorageService.saveUser(user);
-          return user;
+      try {
+          const user = await db.users.get(u);
+          if (!user) {
+              console.log('User not found:', u);
+              return null;
+          }
+          
+          const hash = await hashPassword(p);
+          console.log('Password verification:', { username: u, passwordHash: user.passwordHash, computedHash: hash, match: user.passwordHash === hash });
+          
+          if (user.passwordHash === hash) {
+              // Update last login
+              user.lastLogin = new Date().toISOString();
+              await db.users.put(user);
+              notifyChange('users');
+              return user;
+          }
+          return null;
+      } catch (err) {
+          console.error('Auth error:', err);
+          return null;
       }
-      return null;
   },
   
   hashPassword, // Export for use in settings
 
   // --- Products ---
-  getProducts: (): Product[] => load(DB_KEYS.PRODUCTS, []),
-  saveProduct: (product: Product) => {
-    const list = load<Product[]>(DB_KEYS.PRODUCTS, []);
+  getProducts: async (): Promise<Product[]> => {
+    return await db.products.toArray();
+  },
+  
+  saveProduct: async (product: Product): Promise<void> => {
     // Ensure numbers are numbers
     product.currentStock = Number(product.currentStock);
     product.mrp = Number(product.mrp);
     product.purchasePrice = Number(product.purchasePrice);
     
-    if (product.id === 0) {
-      product.id = Date.now();
-      list.push(product);
+    if (product.id === 0 || !product.id) {
+      // New product - remove id so Dexie auto-increments
+      delete (product as any).id;
+      await db.products.add(product);
     } else {
-      const idx = list.findIndex(p => p.id === product.id);
-      if (idx !== -1) list[idx] = product;
+      // Update existing product
+      await db.products.put(product);
     }
-    save(DB_KEYS.PRODUCTS, list);
-    notifyChange('products');
-  },
-  deleteProduct: (id: number) => {
-    let list = load<Product[]>(DB_KEYS.PRODUCTS, []);
-    list = list.filter(p => p.id !== id);
-    save(DB_KEYS.PRODUCTS, list);
     notifyChange('products');
   },
   
+  deleteProduct: async (id: number): Promise<void> => {
+    await db.products.delete(id);
+  },
+
+  deleteAllProducts: async (): Promise<void> => {
+    await db.products.clear();
+  },
+
+  deleteBill: async (billId: number): Promise<void> => {
+    // Restore stock for each item in the bill before deleting
+    const bill = await db.bills.get(billId);
+    if (bill) {
+      for (const item of bill.items) {
+        await StorageService.updateStock(item.productId, item.quantity, 'bill_deleted', `Reversed: ${bill.invoiceNumber}`);
+      }
+      await db.bills.delete(billId);
+      notifyChange('bills');
+    }
+  },
+  
   // --- Stock Logic ---
-  updateStock: (productId: number, quantityChange: number, reason: string, referenceId: string = '') => {
-      const products = load<Product[]>(DB_KEYS.PRODUCTS, []);
-      const product = products.find(p => p.id === productId);
+  updateStock: async (productId: number, quantityChange: number, reason: string, referenceId: string = ''): Promise<void> => {
+      const product = await db.products.get(productId);
       
       let productName = 'Unknown';
       if (product) {
@@ -131,86 +155,98 @@ export const StorageService = {
           const current = Number(product.currentStock);
           const change = Number(quantityChange);
           product.currentStock = current + change;
-          save(DB_KEYS.PRODUCTS, products);
+          await db.products.update(productId, product);
       }
 
-      // History
-      const history = load<StockHistory[]>(DB_KEYS.STOCK_HISTORY, []);
-      history.unshift({
-          id: Date.now(),
+      // History - let Dexie auto-increment ID
+      const historyRecord: Omit<StockHistory, 'id'> = {
           timestamp: new Date().toISOString(),
           productId,
           productName,
           changeAmount: Number(quantityChange),
           reason,
           referenceId
-      });
-      if (history.length > 1000) history.length = 1000;
-      save(DB_KEYS.STOCK_HISTORY, history);
-        notifyChange('stock');
+      };
+      await db.stockHistory.add(historyRecord as StockHistory);
+      
+      // Keep recent history, clean old records
+      const allHistory = await db.stockHistory.orderBy('timestamp').reverse().toArray();
+      if (allHistory.length > 1000) {
+          const toDelete = allHistory.slice(1000);
+          await db.stockHistory.bulkDelete(toDelete.map(h => h.id));
+      }
+      
+      notifyChange('stock');
   },
 
-  getStockHistory: (): StockHistory[] => load(DB_KEYS.STOCK_HISTORY, []),
+  getStockHistory: async (): Promise<StockHistory[]> => {
+    return await db.stockHistory.orderBy('timestamp').reverse().toArray();
+  },
 
   // --- Customers ---
-  getCustomers: (): Customer[] => load(DB_KEYS.CUSTOMERS, []),
-  saveCustomer: (customer: Customer) => {
-    const list = load<Customer[]>(DB_KEYS.CUSTOMERS, []);
-    if (customer.id === 0) {
-      customer.id = Date.now();
-      list.push(customer);
+  getCustomers: async (): Promise<Customer[]> => {
+    return await db.customers.toArray();
+  },
+  
+  saveCustomer: async (customer: Customer): Promise<void> => {
+    if (customer.id === 0 || !customer.id) {
+      // New customer - let Dexie auto-increment
+      delete (customer as any).id;
+      await db.customers.add(customer);
     } else {
-      const idx = list.findIndex(c => c.id === customer.id);
-      if (idx !== -1) list[idx] = customer;
+      await db.customers.update(customer.id, customer);
     }
-    save(DB_KEYS.CUSTOMERS, list);
     notifyChange('customers');
   },
-  mergeCustomers: (fromId: number, toId: number) => {
-      const bills = load<Bill[]>(DB_KEYS.BILLS, []);
+  
+  mergeCustomers: async (fromId: number, toId: number): Promise<void> => {
+      const bills = await db.bills.toArray();
+      const toCustomer = await db.customers.get(toId);
+
+      if (!toCustomer) return;
+
       let updatedBills = false;
-      const customers = load<Customer[]>(DB_KEYS.CUSTOMERS, []);
-      const toCustomer = customers.find(c => c.id === toId);
-
-      if(!toCustomer) return; 
-
-      bills.forEach(b => {
+      for (const b of bills) {
           if (b.customerId === fromId) {
               b.customerId = toId;
               b.customerName = toCustomer.name;
               b.customerPhone = toCustomer.phone;
               b.customerAddress = toCustomer.address;
               b.customerGstin = toCustomer.gstin;
+              await db.bills.put(b);
               updatedBills = true;
           }
-      });
-      if (updatedBills) save(DB_KEYS.BILLS, bills);
-      if (updatedBills) notifyChange('bills');
+      }
+      
+      if (updatedBills) {
+          notifyChange('bills');
+      }
 
-      const newCustomers = customers.filter(c => c.id !== fromId);
-      save(DB_KEYS.CUSTOMERS, newCustomers);
-        notifyChange('customers');
+      await db.customers.delete(fromId);
+      notifyChange('customers');
   },
 
   // --- Bills ---
-  getBills: (): Bill[] => load(DB_KEYS.BILLS, []),
-  saveBill: (bill: Bill) => {
-    const list = load<Bill[]>(DB_KEYS.BILLS, []);
-    bill.id = Date.now();
-    list.push(bill);
-    save(DB_KEYS.BILLS, list);
-
+  getBills: async (): Promise<Bill[]> => {
+    return await db.bills.toArray();
+  },
+  
+  saveBill: async (bill: Bill): Promise<void> => {
+    // Let Dexie auto-increment the ID
+    delete (bill as any).id;
+    const newId = await db.bills.add(bill);
+    bill.id = newId as number;
     notifyChange('bills');
 
-    bill.items.forEach(item => {
-        // deduct stock (negative change)
-        StorageService.updateStock(item.productId, -item.quantity, 'sale', `Invoice: ${bill.invoiceNumber}`);
-    });
+    // Deduct stock for each item
+    for (const item of bill.items) {
+        await StorageService.updateStock(item.productId, -item.quantity, 'sale', `Invoice: ${bill.invoiceNumber}`);
+    }
   },
-  getNextInvoiceNumber: (): string => {
-    const settings = load(DB_KEYS.SETTINGS, DEFAULT_SETTINGS);
-    const bills = load<Bill[]>(DB_KEYS.BILLS, []);
-    
+  
+  getNextInvoiceNumber: async (): Promise<string> => {
+    const settings = await StorageService.getSettings();
+    const bills = await db.bills.toArray();
     const date = new Date();
     const year = date.getFullYear();
     const month = date.getMonth(); 
@@ -245,56 +281,96 @@ export const StorageService = {
   },
 
   // --- Sales Persons ---
-  getSalesPersons: (): SalesPerson[] => load(DB_KEYS.SALES_PERSONS, [
-      { id: 1, name: 'Admin', isActive: true }, 
-      { id: 2, name: 'Counter Sale', isActive: true }
-  ]),
-  saveSalesPerson: (person: SalesPerson) => {
-    // Corrected to ensure we load existing (including potential defaults) before saving
-    const list = StorageService.getSalesPersons();
-    if(person.id === 0) {
-        person.id = Date.now();
-        list.push(person);
-    } else {
-        const idx = list.findIndex(p => p.id === person.id);
-        if(idx !== -1) list[idx] = person;
+  getSalesPersons: async (): Promise<SalesPerson[]> => {
+    let persons = await db.salesPersons.toArray();
+    
+    if (persons.length === 0) {
+        const defaults = [
+            { id: 1, name: 'Admin', isActive: true },
+            { id: 2, name: 'Counter Sale', isActive: true }
+        ];
+        await db.salesPersons.bulkAdd(defaults);
+        persons = defaults;
     }
-    save(DB_KEYS.SALES_PERSONS, list);
+    
+    return persons;
+  },
+  
+  saveSalesPerson: async (person: SalesPerson): Promise<void> => {
+    if (person.id === 0 || !person.id) {
+        // New sales person - let Dexie auto-increment
+        delete (person as any).id;
+        await db.salesPersons.add(person);
+    } else {
+        await db.salesPersons.update(person.id, person);
+    }
     notifyChange('salesPersons');
   },
 
   // --- Backups ---
-  performAutoBackup: () => {
+  performAutoBackup: async (): Promise<void> => {
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
-      const backups = load<BackupRecord[]>(DB_KEYS.BACKUPS, []);
+      const backups = await db.backups.toArray();
       
       // Check if backup already exists for today
       const existing = backups.find(b => b.type === 'auto' && b.timestamp.startsWith(dateStr));
       if (existing) return;
 
-      const fullData = JSON.stringify(localStorage);
-      const newBackup: BackupRecord = {
-          id: Date.now().toString(),
+      const backupData = {
+          settings: await StorageService.getSettings(),
+          products: await StorageService.getProducts(),
+          customers: await StorageService.getCustomers(),
+          bills: await StorageService.getBills(),
+          salesPersons: await StorageService.getSalesPersons(),
+          stockHistory: await StorageService.getStockHistory(),
+          users: await StorageService.getUsers()
+      };
+
+      const fullData = JSON.stringify(backupData);
+      const newBackup: Omit<BackupRecord, 'id'> & { id?: string } = {
           timestamp: now.toISOString(),
           type: 'auto',
           size: fullData.length,
           data: fullData
       };
       
-      const updatedBackups = [newBackup, ...backups].slice(0, 7); // Keep last 7
-      save(DB_KEYS.BACKUPS, updatedBackups);
+      await db.backups.add(newBackup as BackupRecord);
+      
+      // Keep only last 7 backups
+      const allBackups = await db.backups.orderBy('timestamp').reverse().toArray();
+      if (allBackups.length > 7) {
+          const toDelete = allBackups.slice(7);
+          await db.backups.bulkDelete(toDelete.map(b => b.id));
+      }
   },
   
-  getBackups: (): BackupRecord[] => load(DB_KEYS.BACKUPS, []),
+  getBackups: async (): Promise<BackupRecord[]> => {
+    return await db.backups.orderBy('timestamp').reverse().toArray();
+  },
   
-  restoreBackup: (backup: BackupRecord) => {
+  restoreBackup: async (backup: BackupRecord): Promise<boolean> => {
       try {
           const data = JSON.parse(backup.data);
-          localStorage.clear();
-          Object.keys(data).forEach(k => {
-              localStorage.setItem(k, data[k]);
-          });
+          
+          // Clear all tables
+          await db.products.clear();
+          await db.customers.clear();
+          await db.bills.clear();
+          await db.salesPersons.clear();
+          await db.stockHistory.clear();
+          await db.users.clear();
+          
+          // Restore data
+          if (data.settings) await setKeyValue('nhw_settings', data.settings);
+          if (data.products && data.products.length > 0) await db.products.bulkAdd(data.products);
+          if (data.customers && data.customers.length > 0) await db.customers.bulkAdd(data.customers);
+          if (data.bills && data.bills.length > 0) await db.bills.bulkAdd(data.bills);
+          if (data.salesPersons && data.salesPersons.length > 0) await db.salesPersons.bulkAdd(data.salesPersons);
+          if (data.stockHistory && data.stockHistory.length > 0) await db.stockHistory.bulkAdd(data.stockHistory);
+          if (data.users && data.users.length > 0) await db.users.bulkAdd(data.users);
+          
+          notifyChange('restore');
           return true;
       } catch (e) {
           console.error("Restore failed", e);
@@ -303,24 +379,24 @@ export const StorageService = {
   },
 
   // Manual export/import for user download
-  exportBackupFile: (): string => {
+  exportBackupFile: async (): Promise<string> => {
       const backupData = {
           exportedAt: new Date().toISOString(),
           appVersion: '1.0.0',
           data: {
-              settings: StorageService.getSettings(),
-              products: StorageService.getProducts(),
-              customers: StorageService.getCustomers(),
-              bills: StorageService.getBills(),
-              salesPersons: StorageService.getSalesPersons(),
-              stockHistory: load(DB_KEYS.STOCK_HISTORY, []),
-              users: StorageService.getUsers()
+              settings: await StorageService.getSettings(),
+              products: await StorageService.getProducts(),
+              customers: await StorageService.getCustomers(),
+              bills: await StorageService.getBills(),
+              salesPersons: await StorageService.getSalesPersons(),
+              stockHistory: await StorageService.getStockHistory(),
+              users: await StorageService.getUsers()
           }
       };
       return JSON.stringify(backupData, null, 2);
   },
 
-  importBackupFile: (jsonData: string): { success: boolean; message: string } => {
+  importBackupFile: async (jsonData: string): Promise<{ success: boolean; message: string }> => {
       try {
           const backupData = JSON.parse(jsonData);
           
@@ -335,14 +411,22 @@ export const StorageService = {
               return { success: false, message: 'Backup missing settings data' };
           }
 
+          // Clear and restore data
+          await db.products.clear();
+          await db.customers.clear();
+          await db.bills.clear();
+          await db.salesPersons.clear();
+          await db.stockHistory.clear();
+          await db.users.clear();
+
           // Import all data
-          if (settings) save(DB_KEYS.SETTINGS, settings);
-          if (products) save(DB_KEYS.PRODUCTS, products);
-          if (customers) save(DB_KEYS.CUSTOMERS, customers);
-          if (bills) save(DB_KEYS.BILLS, bills);
-          if (salesPersons) save(DB_KEYS.SALES_PERSONS, salesPersons);
-          if (stockHistory) save(DB_KEYS.STOCK_HISTORY, stockHistory);
-          if (users) save(DB_KEYS.USERS, users);
+          if (settings) await setKeyValue('nhw_settings', settings);
+          if (products && products.length > 0) await db.products.bulkAdd(products);
+          if (customers && customers.length > 0) await db.customers.bulkAdd(customers);
+          if (bills && bills.length > 0) await db.bills.bulkAdd(bills);
+          if (salesPersons && salesPersons.length > 0) await db.salesPersons.bulkAdd(salesPersons);
+          if (stockHistory && stockHistory.length > 0) await db.stockHistory.bulkAdd(stockHistory);
+          if (users && users.length > 0) await db.users.bulkAdd(users);
 
           notifyChange('import');
           return { success: true, message: 'Backup imported successfully!' };

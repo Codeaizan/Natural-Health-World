@@ -27,31 +27,35 @@ const Customers: React.FC = () => {
         loadCustomers();
     }, []);
 
-    const loadCustomers = () => {
-        setCustomers(StorageService.getCustomers());
+    const loadCustomers = async () => {
+        const data = await StorageService.getCustomers();
+        setCustomers(data);
     };
 
     // Filter History when dates change or modal opens
     useEffect(() => {
         if(viewHistory) {
-            const allBills = StorageService.getBills();
-            let relevant = allBills
-                .filter(b => b.customerId === viewHistory.id)
-                .sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-            
-            if (historyStart) {
-                relevant = relevant.filter(b => b.date >= historyStart);
-            }
-            if (historyEnd) {
-                // Add 1 day to include the end date fully or just string compare
-                relevant = relevant.filter(b => b.date.split('T')[0] <= historyEnd);
-            }
+            const loadHistory = async () => {
+                const allBills = await StorageService.getBills();
+                let relevant = allBills
+                    .filter(b => b.customerId === viewHistory.id)
+                    .sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                
+                if (historyStart) {
+                    relevant = relevant.filter(b => b.date >= historyStart);
+                }
+                if (historyEnd) {
+                    // Add 1 day to include the end date fully or just string compare
+                    relevant = relevant.filter(b => b.date.split('T')[0] <= historyEnd);
+                }
 
-            setCustomerBills(relevant);
+                setCustomerBills(relevant);
+            };
+            loadHistory();
         }
     }, [viewHistory, historyStart, historyEnd]);
 
-    const handleSave = (e: React.FormEvent) => {
+    const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
 
@@ -69,7 +73,7 @@ const Customers: React.FC = () => {
             }
         }
         
-        StorageService.saveCustomer({
+        await StorageService.saveCustomer({
             id: current.id || 0,
             name: current.name,
             phone: current.phone,
@@ -77,11 +81,11 @@ const Customers: React.FC = () => {
             address: current.address || '',
             gstin: current.gstin || ''
         });
-        loadCustomers();
+        await loadCustomers();
         setIsModalOpen(false);
     };
 
-    const handleMerge = (e: React.FormEvent) => {
+    const handleMerge = async (e: React.FormEvent) => {
         e.preventDefault();
         if (mergeFrom === mergeTo) {
             alert("Cannot merge a customer into themselves.");
@@ -94,9 +98,9 @@ const Customers: React.FC = () => {
 
         const confirm = window.confirm("Are you sure? This will move all bills from the source customer to the target customer and DELETE the source customer profile. This cannot be undone.");
         if (confirm) {
-            StorageService.mergeCustomers(Number(mergeFrom), Number(mergeTo));
+            await StorageService.mergeCustomers(Number(mergeFrom), Number(mergeTo));
             alert("Customers merged successfully.");
-            loadCustomers();
+            await loadCustomers();
             setIsMergeModalOpen(false);
             setMergeFrom('');
             setMergeTo('');
@@ -146,7 +150,7 @@ const Customers: React.FC = () => {
                 <div className="relative w-full md:w-96">
                     <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
                     <input 
-                        className="w-full pl-9 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+                        className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
                         placeholder="Search Customers (Name, Phone, GSTIN)..."
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}

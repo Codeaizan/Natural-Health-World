@@ -37,11 +37,15 @@ const Reports: React.FC = () => {
     const [stockHistory, setStockHistory] = useState<StockHistory[]>([]);
 
     useEffect(() => {
-        const loadAll = () => {
-            setAllBills(StorageService.getBills());
-            setProducts(StorageService.getProducts());
-            setSalesPersons(StorageService.getSalesPersons());
-            setStockHistory(StorageService.getStockHistory());
+        const loadAll = async () => {
+            const bills = await StorageService.getBills();
+            const products = await StorageService.getProducts();
+            const salesPersons = await StorageService.getSalesPersons();
+            const stockHistory = await StorageService.getStockHistory();
+            setAllBills(bills);
+            setProducts(products);
+            setSalesPersons(salesPersons);
+            setStockHistory(stockHistory);
         };
 
         loadAll();
@@ -284,7 +288,7 @@ const Reports: React.FC = () => {
     return (
         <div className="space-y-6 pb-12">
             {/* Header / Filter Bar */}
-            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border no-print">
+            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200 no-print">
                 <div className="flex flex-wrap gap-2">
                     {[
                         { id: 'sales', label: 'Sales Summary', icon: TrendingUp },

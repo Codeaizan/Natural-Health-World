@@ -33,28 +33,36 @@ const TaxCompliance: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    const billsData = StorageService.getBills();
-    const settings = StorageService.getSettings();
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const billsData = await StorageService.getBills();
+        const settings = await StorageService.getSettings();
 
-    setBills(billsData);
+        setBills(billsData);
 
-    // Generate GSTR data
-    const gstr1 = TaxComplianceService.generateGSTR1(billsData, selectedMonth, selectedYear);
-    const gstr2 = TaxComplianceService.generateGSTR2(billsData, selectedMonth, selectedYear);
+        // Generate GSTR data
+        const gstr1 = TaxComplianceService.generateGSTR1(billsData, selectedMonth, selectedYear);
+        const gstr2 = TaxComplianceService.generateGSTR2(billsData, selectedMonth, selectedYear);
 
-    setGstr1Data(gstr1);
-    setGstr2Data(gstr2);
+        setGstr1Data(gstr1);
+        setGstr2Data(gstr2);
 
-    // Load logs and alerts
-    setAuditLogs(TaxComplianceService.getTaxAuditLogs());
-    setComplianceAlerts(TaxComplianceService.getComplianceAlerts());
-    setAdjustments(TaxComplianceService.getTaxAdjustments());
+        // Load logs and alerts
+        setAuditLogs(TaxComplianceService.getTaxAuditLogs());
+        setComplianceAlerts(TaxComplianceService.getComplianceAlerts());
+        setAdjustments(TaxComplianceService.getTaxAdjustments());
 
-    // Check compliance
-    TaxComplianceService.checkCompliance(billsData, settings);
+        // Check compliance
+        TaxComplianceService.checkCompliance(billsData, settings);
+      } catch (err) {
+        console.error('Error loading tax compliance data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    setLoading(false);
+    loadData();
   }, [selectedMonth, selectedYear]);
 
   const taxSummary = gstr1Data && TaxComplianceService.generateTaxSummary(bills, selectedMonth, selectedYear);

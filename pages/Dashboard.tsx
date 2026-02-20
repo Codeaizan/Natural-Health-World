@@ -10,8 +10,13 @@ const Dashboard: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   
   useEffect(() => {
-    setBills(StorageService.getBills());
-    setProducts(StorageService.getProducts());
+    const loadData = async () => {
+      const billsData = await StorageService.getBills();
+      const productsData = await StorageService.getProducts();
+      setBills(billsData);
+      setProducts(productsData);
+    };
+    loadData();
   }, []);
 
   // Metrics
@@ -41,17 +46,44 @@ const Dashboard: React.FC = () => {
     return { name: dateStr.slice(5), sales: dailySales };
   });
 
-  const StatCard = ({ title, value, icon: Icon, color }: any) => (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
-      <div className={`p-4 rounded-full mr-4 ${color} bg-opacity-10 text-opacity-100`}>
-        <Icon size={24} className={color.replace('bg-', 'text-')} />
+  const StatCard = ({ title, value, icon: Icon, color }: any) => {
+    // Parse color to get the base color (e.g., "emerald" from "text-emerald-600")
+    const colorMap: any = {
+      'emerald-600': { bg: 'bg-emerald-100', text: 'text-emerald-600' },
+      'blue-600': { bg: 'bg-blue-100', text: 'text-blue-600' },
+      'amber-600': { bg: 'bg-amber-100', text: 'text-amber-600' },
+      'red-600': { bg: 'bg-red-100', text: 'text-red-600' }
+    };
+    
+    let bgClass = 'bg-gray-100';
+    let textClass = 'text-gray-600';
+    
+    if (color.includes('emerald')) {
+      bgClass = colorMap['emerald-600'].bg;
+      textClass = colorMap['emerald-600'].text;
+    } else if (color.includes('blue')) {
+      bgClass = colorMap['blue-600'].bg;
+      textClass = colorMap['blue-600'].text;
+    } else if (color.includes('amber')) {
+      bgClass = colorMap['amber-600'].bg;
+      textClass = colorMap['amber-600'].text;
+    } else if (color.includes('red')) {
+      bgClass = colorMap['red-600'].bg;
+      textClass = colorMap['red-600'].text;
+    }
+    
+    return (
+      <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
+        <div className={`p-4 rounded-full mr-4 ${bgClass}`}>
+          <Icon size={24} className={textClass} />
+        </div>
+        <div>
+          <p className="text-sm text-gray-500 font-medium">{title}</p>
+          <h3 className="text-2xl font-bold text-gray-800">{value}</h3>
+        </div>
       </div>
-      <div>
-        <p className="text-sm text-gray-500 font-medium">{title}</p>
-        <h3 className="text-2xl font-bold text-gray-800">{value}</h3>
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -85,9 +117,9 @@ const Dashboard: React.FC = () => {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-80">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-96">
           <h3 className="text-lg font-bold mb-4" style={{ color: COLORS.darkText }}>Sales Trend (Last 7 Days)</h3>
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="85%">
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" axisLine={false} tickLine={false} />

@@ -74,33 +74,41 @@ const Analytics: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    const billsData = StorageService.getBills();
-    const productsData = StorageService.getProducts();
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const billsData = await StorageService.getBills();
+        const productsData = await StorageService.getProducts();
 
-    setBills(billsData);
-    setProducts(productsData);
+        setBills(billsData);
+        setProducts(productsData);
 
-    // Generate all analytics data
-    const dashboardMetrics = AnalyticsService.generateMetricsDashboard(billsData, productsData, selectedMonth, selectedYear);
-    setMetrics(dashboardMetrics);
+        // Generate all analytics data
+        const dashboardMetrics = AnalyticsService.generateMetricsDashboard(billsData, productsData, selectedMonth, selectedYear);
+        setMetrics(dashboardMetrics);
 
-    const pnl = AnalyticsService.generateProfitLossStatement(billsData, selectedMonth, selectedYear);
-    setPnlData(pnl);
+        const pnl = AnalyticsService.generateProfitLossStatement(billsData, selectedMonth, selectedYear);
+        setPnlData(pnl);
 
-    const cashFlow = AnalyticsService.generateCashFlowStatement(billsData, selectedMonth, selectedYear);
-    setCashFlowData(cashFlow);
+        const cashFlow = AnalyticsService.generateCashFlowStatement(billsData, selectedMonth, selectedYear);
+        setCashFlowData(cashFlow);
 
-    const inventory = AnalyticsService.calculateInventoryValuation(productsData, billsData, inventoryMethod);
-    setInventoryData(inventory);
+        const inventory = AnalyticsService.calculateInventoryValuation(productsData, billsData, inventoryMethod);
+        setInventoryData(inventory);
 
-    const yoy = AnalyticsService.generateYearOverYearComparison(billsData, selectedYear);
-    setYoyData(yoy);
+        const yoy = AnalyticsService.generateYearOverYearComparison(billsData, selectedYear);
+        setYoyData(yoy);
 
-    const salesByProd = AnalyticsService.generateSalesByProductReport(billsData);
-    setSalesByProduct(salesByProd);
+        const salesByProd = AnalyticsService.generateSalesByProductReport(billsData);
+        setSalesByProduct(salesByProd);
+      } catch (err) {
+        console.error('Error loading analytics data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    setLoading(false);
+    loadData();
   }, [selectedMonth, selectedYear, inventoryMethod]);
 
   if (loading) {

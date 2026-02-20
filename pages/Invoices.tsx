@@ -15,8 +15,13 @@ const Invoices: React.FC = () => {
   const printableRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setBills(StorageService.getBills().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-    setSettings(StorageService.getSettings());
+    const loadData = async () => {
+      const billsData = await StorageService.getBills();
+      const settingsData = await StorageService.getSettings();
+      setBills(billsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+      setSettings(settingsData);
+    };
+    loadData();
   }, []);
 
   const filteredBills = bills.filter(bill => {
@@ -54,20 +59,13 @@ const Invoices: React.FC = () => {
     printWindow.print();
   };
 
-  const deleteBill = (billId: number) => {
-    if (!window.confirm('Are you sure you want to delete this invoice?')) return;
+  const deleteBill = async (billId: number) => {
+    if (!window.confirm('Are you sure you want to delete this invoice? Stock will be restored.')) return;
     
-    const currentBills = StorageService.getBills();
-    const updatedBills = currentBills.filter(b => b.id !== billId);
+    await StorageService.deleteBill(billId);
     
-    // Re-save all bills except the deleted one
-    updatedBills.forEach(bill => {
-      const existingBill = currentBills.find(b => b.id === bill.id);
-      if (existingBill) {
-        StorageService.saveBill(bill);
-      }
-    });
-
+    // Refresh from database
+    const updatedBills = await StorageService.getBills();
     setBills(updatedBills.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
     if (selectedBill?.id === billId) {
       setSelectedBill(null);
@@ -151,16 +149,16 @@ const Invoices: React.FC = () => {
           {bill.isGstBill && (
             <>
               <div className="flex justify-between p-2 border-b border-gray-300 text-sm">
-                <span>CGST @ 9%</span>
+                <span>CGST</span>
                 <span>₹{bill.cgstAmount.toFixed(2)}</span>
               </div>
               <div className="flex justify-between p-2 border-b border-gray-300 text-sm">
-                <span>SGST @ 9%</span>
+                <span>SGST</span>
                 <span>₹{bill.sgstAmount.toFixed(2)}</span>
               </div>
               {bill.igstAmount > 0 && (
                 <div className="flex justify-between p-2 border-b border-gray-300 text-sm">
-                  <span>IGST @ 18%</span>
+                  <span>IGST</span>
                   <span>₹{bill.igstAmount.toFixed(2)}</span>
                 </div>
               )}
@@ -184,7 +182,7 @@ const Invoices: React.FC = () => {
       {/* Amount in Words */}
       <div className="mb-6 p-3 bg-gray-100 rounded">
         <p className="text-xs">
-          <span className="font-semibold">Amount in Words:</span> {numberToWords(Math.floor(bill.grandTotal))} Rupees Only
+          <span className="font-semibold">Amount in Words:</span> {numberToWords(Math.floor(bill.grandTotal))}
         </p>
       </div>
 

@@ -26,29 +26,37 @@ const Forecasting: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
-    const billsData = StorageService.getBills();
-    const productsData = StorageService.getProducts();
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const billsData = await StorageService.getBills();
+        const productsData = await StorageService.getProducts();
 
-    setBills(billsData);
-    setProducts(productsData);
+        setBills(billsData);
+        setProducts(productsData);
 
-    // Generate forecasts
-    const productForecasts = ForecastingService.forecastProductDemand(
-      billsData,
-      productsData,
-      forecastDays
-    );
-    setForecastedProducts(productForecasts);
+        // Generate forecasts
+        const productForecasts = ForecastingService.forecastProductDemand(
+          billsData,
+          productsData,
+          forecastDays
+        );
+        setForecastedProducts(productForecasts);
 
-    const generalForecastData = ForecastingService.forecastSales(billsData, forecastDays);
-    setGeneralForecast(generalForecastData);
+        const generalForecastData = ForecastingService.forecastSales(billsData, forecastDays);
+        setGeneralForecast(generalForecastData);
 
-    if (productForecasts.length > 0) {
-      setSelectedProduct(productForecasts[0]);
-    }
+        if (productForecasts.length > 0) {
+          setSelectedProduct(productForecasts[0]);
+        }
+      } catch (err) {
+        console.error('Error loading forecasting data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    setLoading(false);
+    loadData();
   }, [forecastDays]);
 
   const recommendations = ForecastingService.getDemandRecommendations(forecastedProducts);

@@ -27,9 +27,9 @@ const App: React.FC = () => {
   // Auto Backup Loop
   useEffect(() => {
     if (isAuthenticated) {
-        StorageService.performAutoBackup();
+        StorageService.performAutoBackup().catch(e => console.error('Backup error:', e));
         const interval = setInterval(() => {
-            StorageService.performAutoBackup();
+            StorageService.performAutoBackup().catch(e => console.error('Backup error:', e));
         }, 60 * 60 * 1000); 
         return () => clearInterval(interval);
     }
