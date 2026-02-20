@@ -3,8 +3,12 @@ import Login from './pages/Login';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Billing from './pages/Billing';
+import Invoices from './pages/Invoices';
 import Inventory from './pages/Inventory';
 import Customers from './pages/Customers';
+import Forecasting from './pages/Forecasting';
+import TaxCompliance from './pages/TaxCompliance';
+import Analytics from './pages/Analytics';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import { StorageService } from './services/storage';
@@ -77,8 +81,12 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
       case 'billing': return <Billing />;
+      case 'invoices': return <Invoices />;
       case 'inventory': return <Inventory />;
       case 'customers': return <Customers />;
+      case 'forecasting': return <Forecasting />;
+      case 'tax-compliance': return <TaxCompliance />;
+      case 'analytics': return <Analytics />;
       case 'reports': return <Reports />;
       case 'settings': return <Settings />;
       default: return <Dashboard />;

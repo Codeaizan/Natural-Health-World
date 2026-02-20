@@ -39,12 +39,7 @@ const Billing: React.FC = () => {
     setSalesPersons(StorageService.getSalesPersons());
   }, []);
 
-  // Auto-download bill as PDF when it's created
-  useEffect(() => {
-    if (lastBill) {
-      downloadBillAsPDF(lastBill);
-    }
-  }, [lastBill?.id]); // Trigger only when bill ID changes
+  // Bills are now managed in the Invoices page - auto-download removed
 
   // -- Handlers --
 

@@ -7,7 +7,11 @@ import {
   Users, 
   BarChart3, 
   Settings, 
-  LogOut 
+  LogOut,
+  TrendingUp,
+  FileText,
+  LineChart,
+  Archive
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -21,8 +25,12 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange, onLog
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'billing', label: 'Billing', icon: ShoppingCart },
+    { id: 'invoices', label: 'Invoices', icon: Archive },
     { id: 'inventory', label: 'Inventory', icon: Package },
     { id: 'customers', label: 'Customers', icon: Users },
+    { id: 'forecasting', label: 'Forecasting', icon: TrendingUp },
+    { id: 'tax-compliance', label: 'Tax Compliance', icon: FileText },
+    { id: 'analytics', label: 'Analytics', icon: LineChart },
     { id: 'reports', label: 'Reports', icon: BarChart3 },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
