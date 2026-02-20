@@ -121,13 +121,16 @@ const Reports: React.FC = () => {
 
     // --- 3. Staff Performance ---
     const staffMetrics = useMemo(() => {
-        return salesPersons.map(sp => {
+        const metrics = salesPersons.map(sp => {
             const spBills = filteredBills.filter(b => b.salesPersonId === sp.id || b.salesPersonName === sp.name);
             const revenue = spBills.reduce((sum, b) => sum + b.grandTotal, 0);
             const count = spBills.length;
             const avg = count > 0 ? revenue / count : 0;
             return { ...sp, revenue, count, avg };
-        }).filter(sp => selectedSalesPerson === 'all' || sp.id.toString() === selectedSalesPerson);
+        });
+        
+        if (selectedSalesPerson === 'all') return metrics;
+        return metrics.filter(sp => sp.id.toString() === selectedSalesPerson);
     }, [filteredBills, salesPersons, selectedSalesPerson]);
 
     // --- 4. GST Report (HSN) ---
@@ -163,6 +166,16 @@ const Reports: React.FC = () => {
 
         return { totalTaxable, totalCGST, totalSGST, totalIGST, totalTax: totalCGST + totalSGST + totalIGST, hsnData };
     }, [filteredBills]);
+
+    // --- 4.5. Stock History (Filtered by Date) ---
+    const filteredStockHistory = useMemo(() => {
+        const start = new Date(startDate).getTime();
+        const end = new Date(endDate).setHours(23, 59, 59, 999);
+        return stockHistory.filter(s => {
+            const d = new Date(s.timestamp).getTime();
+            return d >= start && d <= end;
+        });
+    }, [stockHistory, startDate, endDate]);
 
     // --- 5. Customer Analytics ---
     const customerMetrics = useMemo(() => {
@@ -529,44 +542,66 @@ const Reports: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- STOCK HISTORY (LEGACY) --- */}
+                {/* --- STOCK HISTORY --- */}
                 {activeTab === 'stock' && (
                     <div className="bg-white p-6 rounded-xl shadow-sm border">
                         <h3 className="font-bold text-gray-700 mb-4">Stock Movement History</h3>
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm text-left">
-                                <thead className="bg-gray-50 text-gray-600">
-                                    <tr>
-                                        <th className="p-3">Date</th>
-                                        <th className="p-3">Product</th>
-                                        <th className="p-3 text-right">Change</th>
-                                        <th className="p-3">Reason</th>
-                                        <th className="p-3">Notes</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y">
-                                    {stockHistory.map((s, i) => (
-                                        <tr key={i}>
-                                            <td className="p-3">{new Date(s.timestamp).toLocaleDateString()}</td>
-                                            <td className="p-3 font-medium">{s.productName}</td>
-                                            <td className={`p-3 text-right font-bold ${s.changeAmount > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                                {s.changeAmount > 0 ? '+' : ''}{s.changeAmount}
-                                            </td>
-                                            <td className="p-3 capitalize">
-                                                 <span className={`px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700`}>
-                                                    {s.reason}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 text-xs text-gray-500 max-w-xs truncate">{s.referenceId}</td>
+                        {filteredStockHistory.length === 0 ? (
+                            <div className="p-8 text-center text-gray-400">No stock movements found in this period.</div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="bg-gray-50 text-gray-600">
+                                        <tr>
+                                            <th className="p-3">Date</th>
+                                            <th className="p-3">Product</th>
+                                            <th className="p-3 text-right">Change</th>
+                                            <th className="p-3">Reason</th>
+                                            <th className="p-3">Notes</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody className="divide-y">
+                                        {filteredStockHistory.map((s, i) => (
+                                            <tr key={i}>
+                                                <td className="p-3">{new Date(s.timestamp).toLocaleDateString()}</td>
+                                                <td className="p-3 font-medium">{s.productName}</td>
+                                                <td className={`p-3 text-right font-bold ${s.changeAmount > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                                    {s.changeAmount > 0 ? '+' : ''}{s.changeAmount}
+                                                </td>
+                                                <td className="p-3 capitalize">
+                                                     <span className={`px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700`}>
+                                                        {s.reason}
+                                                    </span>
+                                                </td>
+                                                <td className="p-3 text-xs text-gray-500 max-w-xs truncate">{s.referenceId}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                     </div>
                 )}
 
             </div>
+
+            <style>{`
+              @media print {
+                .no-print { display: none !important; }
+                body { background: white; }
+                .space-y-6 { margin-top: 0; }
+                .bg-white { background: white !important; }
+                .border { border: 1px solid #ddd !important; }
+                .shadow-sm { box-shadow: none !important; }
+                .rounded-xl { border-radius: 0; }
+                table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                th, td { padding: 10px; border: 1px solid #ddd; text-align: left; }
+                th { background-color: #f5f5f5 !important; font-weight: bold; }
+                .grid { display: block; }
+                .md\\:grid-cols-2, .lg\\:grid-cols-4, .lg\\:grid-cols-2 { display: grid; grid-template-columns: 1fr 1fr; }
+                @page { margin: 0.5in; }
+              }
+            `}</style>
         </div>
     );
 };

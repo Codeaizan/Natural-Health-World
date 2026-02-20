@@ -49,7 +49,7 @@ const Inventory: React.FC = () => {
       id: currentProduct.id || 0,
       name: currentProduct.name,
       category: currentProduct.category || 'General',
-      hsnCode: currentProduct.hsnCode || '30049012',
+      hsnCode: currentProduct.hsnCode || '',
       unit: currentProduct.unit || 'Nos',
       packageSize: currentProduct.packageSize || '',
       batchNumber: currentProduct.batchNumber || '',
@@ -152,7 +152,32 @@ const Inventory: React.FC = () => {
       setIsStockModalOpen(true);
   };
 
-  // --- CSV Export/Import (Same as before) ---
+  // --- CSV Parser Helper ---
+  const parseCSVLine = (line: string): string[] => {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+              if (inQuotes && line[i + 1] === '"') {
+                  current += '"';
+                  i++;
+              } else {
+                  inQuotes = !inQuotes;
+              }
+          } else if (char === ',' && !inQuotes) {
+              result.push(current.trim());
+              current = '';
+          } else {
+              current += char;
+          }
+      }
+      result.push(current.trim());
+      return result;
+  };
+
+  // --- CSV Export/Import ---
   const handleExport = (onlyLowStock: boolean = false) => {
       const dataToExport = onlyLowStock 
         ? products.filter(p => p.currentStock <= p.minStockLevel)
@@ -180,27 +205,90 @@ const Inventory: React.FC = () => {
       reader.onload = (evt) => {
           const text = evt.target?.result as string;
           try {
-             const lines = text.split("\n").map(l => l.trim()).filter(l => l);
+             const lines = text.split("\n").filter(l => l.trim());
+             if (lines.length < 2) { alert("CSV file is empty."); return; }
+             
+             // Parse header to determine column order
+             const headerLine = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
+             const headers = headerLine.map(h => h.replace(/\s+\(.*?\)/, '')); // Remove "(INR)", "(YYYY-MM-DD)" etc
+             
+             // Detect which format we're dealing with
+             const hasProduct = headers.some(h => h.includes('product') || h.includes('name'));
+             const hasMRP = headers.some(h => h.includes('mrp'));
+             const hasPackage = headers.some(h => h.includes('package') || h.includes('size'));
+             
+             if (!hasProduct || !hasMRP) {
+                 alert("CSV must have 'Product' and 'MRP' columns.");
+                 return;
+             }
+             
+             // Find column indices
+             const productIdx = headers.findIndex(h => h.includes('product') || h.includes('name'));
+             const packageIdx = headers.findIndex(h => h.includes('package') || h.includes('size'));
+             const mrpIdx = headers.findIndex(h => h.includes('mrp'));
+             const categoryIdx = headers.findIndex(h => h.includes('category'));
+             const hsnIdx = headers.findIndex(h => h.includes('hsn'));
+             const unitIdx = headers.findIndex(h => h.includes('unit') && !h.includes('package'));
+             const batchIdx = headers.findIndex(h => h.includes('batch'));
+             const expiryIdx = headers.findIndex(h => h.includes('expiry'));
+             const discIdx = headers.findIndex(h => h.includes('discount'));
+             const purchIdx = headers.findIndex(h => h.includes('purchase'));
+             const gstIdx = headers.findIndex(h => h.includes('gst'));
+             const stockIdx = headers.findIndex(h => h.includes('stock') && !h.includes('min'));
+             const minStockIdx = headers.findIndex(h => h.includes('min'));
+             
              let count = 0;
              for(let i = 1; i < lines.length; i++) {
-                 const cols = lines[i].split(",").map(c => c.replace(/^"|"$/g, '').trim());
-                 if(cols.length < 5) continue; 
-                 const [name, category, hsn, unit, pkgSize, batch, exp, mrp, disc, purch, gst, stock, minStock] = cols;
-                 if(!name || !mrp) continue;
+                 const cols = parseCSVLine(lines[i]).map(c => c.replace(/^"|"$/g, '').trim());
+                 if(cols.length < 2) continue;
+                 
+                 // Extract values with fallbacks
+                 const name = cols[productIdx] || '';
+                 const mrpStr = cols[mrpIdx] || '0';
+                 const mprNum = parseFloat(mrpStr);
+                 
+                 if (!name || isNaN(mprNum) || mprNum <= 0) continue;
+                 
+                 // Extract package size if present, otherwise use empty
+                 let packageSize = '';
+                 let unit = 'Nos';
+                 if (packageIdx >= 0) {
+                     packageSize = cols[packageIdx] || '';
+                     // Try to extract unit from package size (e.g., "30 nos" -> unit="nos", size="30")
+                     const match = packageSize.match(/(\d+)\s*([a-zA-Z]+)/);
+                     if (match) {
+                         unit = match[2];
+                     }
+                 }
+                 if (unitIdx >= 0) unit = cols[unitIdx] || unit;
+                 
                  const newP: Product = {
-                     id: 0, 
-                     name: name, category: category || 'General', hsnCode: hsn || '30049012', unit: unit || 'Nos', packageSize: pkgSize || '',
-                     batchNumber: batch || '', expiryDate: exp || '',
-                     mrp: parseFloat(mrp) || 0, discountPercent: parseFloat(disc) || 0, purchasePrice: parseFloat(purch) || 0,
-                     gstRate: parseFloat(gst) || 5, currentStock: parseFloat(stock) || 0, minStockLevel: parseFloat(minStock) || 10,
-                     sellingPrice: (parseFloat(mrp) || 0) - ((parseFloat(mrp) || 0) * (parseFloat(disc) || 0) / 100)
+                     id: 0,
+                     name: name,
+                     category: categoryIdx >= 0 ? (cols[categoryIdx] || 'General') : 'General',
+                     hsnCode: hsnIdx >= 0 ? (cols[hsnIdx] || '') : '',
+                     unit: unit,
+                     packageSize: packageSize,
+                     batchNumber: batchIdx >= 0 ? (cols[batchIdx] || '') : '',
+                     expiryDate: expiryIdx >= 0 ? (cols[expiryIdx] || '') : '',
+                     mrp: mprNum,
+                     discountPercent: discIdx >= 0 ? (parseFloat(cols[discIdx]) || 0) : 0,
+                     purchasePrice: purchIdx >= 0 ? (parseFloat(cols[purchIdx]) || 0) : 0,
+                     gstRate: gstIdx >= 0 ? (parseFloat(cols[gstIdx]) || 5) : 5,
+                     currentStock: stockIdx >= 0 ? (parseFloat(cols[stockIdx]) || 0) : 0,
+                     minStockLevel: minStockIdx >= 0 ? (parseFloat(cols[minStockIdx]) || 10) : 10,
+                     sellingPrice: mprNum - (mprNum * ((discIdx >= 0 ? parseFloat(cols[discIdx]) : 0) || 0) / 100)
                  };
                  StorageService.saveProduct(newP);
                  count++;
              }
-             alert(`Imported ${count} products.`);
+             if (count === 0) {
+                 alert("No valid products found. Please check CSV format.\n\nExpected columns: Product (or Name), MRP, and optionally: Package Size, Category, HSN, Unit, Batch, Expiry, Discount %, Purchase Price, GST %, Stock, Min Stock");
+             } else {
+                 alert(`Imported ${count} products.`);
+             }
              loadProducts();
-          } catch (err) { alert("Failed to parse CSV."); }
+          } catch (err) { console.error(err); alert("Failed to parse CSV: " + (err as Error).message); }
       };
       reader.readAsText(file);
       e.target.value = '';

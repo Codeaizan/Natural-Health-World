@@ -17,17 +17,14 @@
         background-color: #f3f4f6;
       }
 
-      /* Print styles for Invoice */
+      /* Print styles for Invoice and Reports */
       @media print {
         @page { margin: 0; }
 
-        body * {
-          visibility: hidden;
-        }
-
-        #printable-area,
-        #printable-area * {
-          visibility: visible;
+        /* For Billing (Invoice) - #printable-area takes priority */
+        body {
+          margin: 0;
+          padding: 0;
         }
 
         #printable-area {
@@ -40,8 +37,47 @@
           background: white;
         }
 
-        .no-print {
+        #printable-area,
+        #printable-area * {
+          visibility: visible !important;
+        }
+
+        /* For Reports and other pages - hide UI, show main content */
+        #root > * > * {
+          margin: 0;
+          padding: 0;
+        }
+
+        /* Hide navigation and UI elements */
+        nav, header, .no-print, [class*="no-print"] {
           display: none !important;
+        }
+
+        /* Show content area */
+        #root {
+          all: revert;
+          background: white;
+        }
+
+        /* Print-friendly defaults */
+        body * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+
+        table {
+          border-collapse: collapse;
+          width: 100%;
+        }
+
+        table td, table th {
+          border: 1px solid #ddd;
+          padding: 8px;
+        }
+
+        th {
+          background-color: #f5f5f5 !important;
         }
       }
     </style>

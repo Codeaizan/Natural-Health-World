@@ -16,6 +16,8 @@ const Settings: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  const [logoUploadStatus, setLogoUploadStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
+
   useEffect(() => {
       setSalesPersons(StorageService.getSalesPersons());
       setUsers(StorageService.getUsers());
@@ -23,21 +25,54 @@ const Settings: React.FC = () => {
 
   const handleSaveSettings = (e: React.FormEvent) => {
       e.preventDefault();
-      StorageService.saveSettings(settings);
-      alert('Settings saved successfully!');
+      try {
+          StorageService.saveSettings(settings);
+          alert('Settings saved successfully!');
+      } catch (err) {
+          alert('Failed to save settings. Storage might be full.');
+      }
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
-      if (file) {
-          const reader = new FileReader();
-          reader.onload = (evt) => {
-              if (evt.target?.result) {
-                  setSettings({ ...settings, logo: evt.target.result as string });
-              }
-          };
-          reader.readAsDataURL(file);
+      if (!file) return;
+
+      // Validate file size (max 5000KB for logo)
+      const maxSizeKB = 5000;
+      if (file.size > maxSizeKB * 1024) {
+          setLogoUploadStatus({ status: 'error', message: `File too large. Max ${maxSizeKB}KB allowed.` });
+          setTimeout(() => setLogoUploadStatus({ status: 'idle' }), 3000);
+          return;
       }
+
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+          setLogoUploadStatus({ status: 'error', message: 'Please select a valid image file.' });
+          setTimeout(() => setLogoUploadStatus({ status: 'idle' }), 3000);
+          return;
+      }
+
+      setLogoUploadStatus({ status: 'loading' });
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+          if (evt.target?.result) {
+              try {
+                  const dataUrl = evt.target.result as string;
+                  setSettings({ ...settings, logo: dataUrl });
+                  setLogoUploadStatus({ status: 'success', message: 'Logo uploaded. Click "Save Settings" to persist.' });
+                  setTimeout(() => setLogoUploadStatus({ status: 'idle' }), 3000);
+              } catch (err) {
+                  setLogoUploadStatus({ status: 'error', message: 'Failed to process image.' });
+                  setTimeout(() => setLogoUploadStatus({ status: 'idle' }), 3000);
+              }
+          }
+      };
+      reader.onerror = () => {
+          setLogoUploadStatus({ status: 'error', message: 'Failed to read file.' });
+          setTimeout(() => setLogoUploadStatus({ status: 'idle' }), 3000);
+      };
+      reader.readAsDataURL(file);
   };
 
   const addSalesPerson = () => {
@@ -114,10 +149,18 @@ const Settings: React.FC = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="col-span-2 flex items-center gap-4 p-4 bg-gray-50 rounded border">
                           {settings.logo ? <img src={settings.logo} alt="Logo" className="h-16 w-auto object-contain" /> : <div className="h-16 w-16 bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs">No Logo</div>}
-                          <div>
-                              <label className="cursor-pointer bg-white border border-gray-300 px-3 py-1 rounded text-sm hover:bg-gray-50 shadow-sm flex items-center"><Upload size={14} className="mr-2"/> Upload Logo<input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} /></label>
+                          <div className="flex-1">
+                              <label className="cursor-pointer bg-white border border-gray-300 px-3 py-1 rounded text-sm hover:bg-gray-50 shadow-sm flex items-center inline-flex"><Upload size={14} className="mr-2"/> Upload Logo<input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} /></label>
+                              {logoUploadStatus.status !== 'idle' && (
+                                  <div className={`mt-2 text-xs font-medium ${logoUploadStatus.status === 'success' ? 'text-green-600' : logoUploadStatus.status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>
+                                      {logoUploadStatus.status === 'loading' && '⏳ '}
+                                      {logoUploadStatus.status === 'success' && '✓ '}
+                                      {logoUploadStatus.status === 'error' && '✗ '}
+                                      {logoUploadStatus.message}
+                                  </div>
+                              )}
                           </div>
-                          {settings.logo && <button type="button" onClick={() => setSettings({...settings, logo: ''})} className="text-red-500 text-sm hover:underline">Remove</button>}
+                          {settings.logo && <button type="button" onClick={() => setSettings({...settings, logo: ''})} className="text-red-500 text-sm hover:underline whitespace-nowrap">Remove</button>}
                       </div>
                       <div><label className="label">Company Name</label><input required className="input" value={settings.name} onChange={e => setSettings({...settings, name: e.target.value})} /></div>
                       <div><label className="label">Tagline</label><input className="input" value={settings.tagline} onChange={e => setSettings({...settings, tagline: e.target.value})} /></div>
