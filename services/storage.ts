@@ -300,5 +300,55 @@ export const StorageService = {
           console.error("Restore failed", e);
           return false;
       }
+  },
+
+  // Manual export/import for user download
+  exportBackupFile: (): string => {
+      const backupData = {
+          exportedAt: new Date().toISOString(),
+          appVersion: '1.0.0',
+          data: {
+              settings: StorageService.getSettings(),
+              products: StorageService.getProducts(),
+              customers: StorageService.getCustomers(),
+              bills: StorageService.getBills(),
+              salesPersons: StorageService.getSalesPersons(),
+              stockHistory: load(DB_KEYS.STOCK_HISTORY, []),
+              users: StorageService.getUsers()
+          }
+      };
+      return JSON.stringify(backupData, null, 2);
+  },
+
+  importBackupFile: (jsonData: string): { success: boolean; message: string } => {
+      try {
+          const backupData = JSON.parse(jsonData);
+          
+          if (!backupData.data) {
+              return { success: false, message: 'Invalid backup file format' };
+          }
+
+          // Validate backup has expected structure
+          const { settings, products, customers, bills, salesPersons, stockHistory, users } = backupData.data;
+          
+          if (!settings) {
+              return { success: false, message: 'Backup missing settings data' };
+          }
+
+          // Import all data
+          if (settings) save(DB_KEYS.SETTINGS, settings);
+          if (products) save(DB_KEYS.PRODUCTS, products);
+          if (customers) save(DB_KEYS.CUSTOMERS, customers);
+          if (bills) save(DB_KEYS.BILLS, bills);
+          if (salesPersons) save(DB_KEYS.SALES_PERSONS, salesPersons);
+          if (stockHistory) save(DB_KEYS.STOCK_HISTORY, stockHistory);
+          if (users) save(DB_KEYS.USERS, users);
+
+          notifyChange('import');
+          return { success: true, message: 'Backup imported successfully!' };
+      } catch (e) {
+          console.error("Import failed", e);
+          return { success: false, message: `Import failed: ${(e as Error).message}` };
+      }
   }
 };

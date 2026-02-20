@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StorageService } from '../services/storage';
 import { CompanySettings, SalesPerson, User } from '../types';
 import { COLORS } from '../constants';
-import { Save, Plus, Trash2, Shield, CreditCard, FileText, Database, Upload, Lock, User as UserIcon } from 'lucide-react';
+import { Save, Plus, Trash2, Shield, CreditCard, FileText, Database, Upload, Lock, User as UserIcon, Download } from 'lucide-react';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<CompanySettings>(StorageService.getSettings());
@@ -17,6 +17,9 @@ const Settings: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const [logoUploadStatus, setLogoUploadStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [backupStatus, setBackupStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
 
   useEffect(() => {
       setSalesPersons(StorageService.getSalesPersons());
@@ -119,6 +122,70 @@ const Settings: React.FC = () => {
              localStorage.clear();
              window.location.reload();
           }
+      }
+  };
+
+  const handleBackupDownload = () => {
+      try {
+          setBackupStatus({ status: 'loading' });
+          const backupContent = StorageService.exportBackupFile();
+          const element = document.createElement('a');
+          const file = new Blob([backupContent], { type: 'application/json' });
+          element.href = URL.createObjectURL(file);
+          element.download = `nhw-backup-${new Date().toISOString().split('T')[0]}.json`;
+          document.body.appendChild(element);
+          element.click();
+          document.body.removeChild(element);
+          URL.revokeObjectURL(element.href);
+          setBackupStatus({ status: 'success', message: 'Backup downloaded successfully!' });
+          setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+      } catch (err) {
+          setBackupStatus({ status: 'error', message: 'Failed to create backup' });
+          setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+      }
+  };
+
+  const handleBackupUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (!file.name.endsWith('.json')) {
+          setBackupStatus({ status: 'error', message: 'Please select a valid JSON backup file' });
+          setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+          return;
+      }
+
+      setBackupStatus({ status: 'loading' });
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+          try {
+              if (evt.target?.result) {
+                  const jsonContent = evt.target.result as string;
+                  const result = StorageService.importBackupFile(jsonContent);
+                  if (result.success) {
+                      setBackupStatus({ status: 'success', message: result.message });
+                      setTimeout(() => {
+                          window.location.reload();
+                      }, 2000);
+                  } else {
+                      setBackupStatus({ status: 'error', message: result.message });
+                      setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+                  }
+              }
+          } catch (err) {
+              setBackupStatus({ status: 'error', message: 'Failed to parse backup file' });
+              setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+          }
+      };
+      reader.onerror = () => {
+          setBackupStatus({ status: 'error', message: 'Failed to read file' });
+          setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+      };
+      reader.readAsText(file);
+      
+      // Reset file input
+      if (fileInputRef.current) {
+          fileInputRef.current.value = '';
       }
   };
 
@@ -265,6 +332,51 @@ const Settings: React.FC = () => {
           {activeTab === 'data' && (
               <div className="bg-white p-6 rounded-xl shadow-sm border space-y-6">
                   <h3 className="font-bold text-lg text-gray-700 flex items-center"><Database className="mr-2" size={20} /> Data Management</h3>
+                  
+                  {/* Backup Section */}
+                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
+                      <h4 className="font-bold text-blue-700 mb-3">Backup & Restore</h4>
+                      <p className="text-sm text-blue-600 mb-4">Create backups of all your data (bills, products, customers, settings) and restore them whenever needed.</p>
+                      <div className="flex gap-3 flex-wrap">
+                          <button 
+                              type="button" 
+                              onClick={handleBackupDownload}
+                              className="px-4 py-2 bg-blue-600 text-white rounded shadow hover:bg-blue-700 flex items-center font-medium"
+                          >
+                              <Download size={18} className="mr-2" /> Download Backup (.JSON)
+                          </button>
+                          <button 
+                              type="button" 
+                              onClick={() => fileInputRef.current?.click()}
+                              className="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 flex items-center font-medium"
+                          >
+                              <Upload size={18} className="mr-2" /> Import Backup
+                          </button>
+                          <input
+                              ref={fileInputRef}
+                              type="file"
+                              accept=".json"
+                              onChange={handleBackupUpload}
+                              className="hidden"
+                          />
+                      </div>
+                      {backupStatus.status !== 'idle' && (
+                          <div className={`mt-3 text-sm font-medium p-2 rounded-lg ${
+                              backupStatus.status === 'success' 
+                                  ? 'bg-green-100 text-green-700' 
+                                  : backupStatus.status === 'error' 
+                                  ? 'bg-red-100 text-red-700' 
+                                  : 'bg-blue-100 text-blue-700'
+                          }`}>
+                              {backupStatus.status === 'loading' && '⏳ '}
+                              {backupStatus.status === 'success' && '✓ '}
+                              {backupStatus.status === 'error' && '✗ '}
+                              {backupStatus.message}
+                          </div>
+                      )}
+                  </div>
+                  
+                  {/* Danger Zone */}
                   <div className="p-4 bg-red-50 border border-red-100 rounded-lg">
                       <h4 className="font-bold text-red-700 mb-2">Danger Zone</h4>
                       <p className="text-sm text-red-600 mb-4">Clearing data will remove all products, customers, and bills permanently.</p>
