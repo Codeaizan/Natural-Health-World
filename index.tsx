@@ -1,27 +1,16 @@
-import React from 'react';
+﻿import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import { db } from './services/db';
+import { StorageService } from './services/storage';
 import './style.css';
 
-// Ensure database is initialized and user table is set up
-console.log('Initializing database...');
+// Ensure database is initialized and default admin user exists
+console.log('Initializing application...');
 async function initializeApp() {
   try {
-    await db.open();
-    console.log('Database opened successfully');
-    
-    // Ensure default admin user exists
-    const users = await db.users.toArray();
-    if (users.length === 0) {
-      const defaultAdmin = {
-        username: 'admin',
-        passwordHash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
-        role: 'admin' as const
-      };
-      await db.users.add(defaultAdmin);
-      console.log('Default admin user created');
-    }
+    // getUsers() handles default admin creation internally for both backends
+    await StorageService.getUsers();
+    console.log('Storage initialized successfully');
     
     const rootElement = document.getElementById('root');
     if (!rootElement) {

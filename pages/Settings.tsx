@@ -4,7 +4,6 @@ import { CompanySettings, SalesPerson, User } from '../types';
 import { COLORS } from '../constants';
 import { DEFAULT_SETTINGS } from '../constants';
 import { Save, Plus, Trash2, Shield, CreditCard, FileText, Database, Upload, Lock, User as UserIcon, Download } from 'lucide-react';
-import { db } from '../services/db';
 
 const Settings: React.FC = () => {
   const [settings, setSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
@@ -132,15 +131,7 @@ const Settings: React.FC = () => {
       if (window.confirm("CRITICAL WARNING: This will delete ALL bills, customers, and products. Are you sure?")) {
           if(window.prompt("Type 'DELETE' to confirm") === 'DELETE') {
              try {
-                 // Clear IndexedDB tables (the actual data store)
-                 await db.products.clear();
-                 await db.customers.clear();
-                 await db.bills.clear();
-                 await db.salesPersons.clear();
-                 await db.stockHistory.clear();
-                 await db.backups.clear();
-                 // Also clear any localStorage remnants
-                 localStorage.clear();
+                 await StorageService.clearAllData();
                  alert('All data cleared successfully. Page will reload.');
                  window.location.reload();
              } catch (err) {
