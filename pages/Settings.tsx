@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { useToast } from '../components/Toast';
 import { StorageService } from '../services/storage';
 import { CompanySettings, SalesPerson, User } from '../types';
-import { COLORS } from '../constants';
-import { DEFAULT_SETTINGS } from '../constants';
-import { Save, Plus, Trash2, Shield, CreditCard, FileText, Database, Upload, Lock, User as UserIcon, Download } from 'lucide-react';
+import { COLORS, DEFAULT_SETTINGS } from '../constants';
+import { Save, Plus, Trash2, Shield, CreditCard, FileText, Database, Upload, Lock, User as UserIcon, Download, FolderOpen } from 'lucide-react';
+import { getDataPath, setDataPath, clearCachedPath, ensureDataFolders } from '../services/dataPath';
 
 const Settings: React.FC = () => {
+  const toast = useToast();
   const [settings, setSettings] = useState<CompanySettings>(DEFAULT_SETTINGS);
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -22,6 +24,10 @@ const Settings: React.FC = () => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [backupStatus, setBackupStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
 
+  // Data path state
+  const [dataPathValue, setDataPathValue] = useState<string>('');
+  const [dataPathStatus, setDataPathStatus] = useState<{ status: 'idle' | 'loading' | 'success' | 'error', message?: string }>({ status: 'idle' });
+
   useEffect(() => {
       const loadData = async () => {
         const settingsData = await StorageService.getSettings();
@@ -30,6 +36,9 @@ const Settings: React.FC = () => {
         setSettings(settingsData);
         setSalesPersons(sp);
         setUsers(u);
+        // Load data path
+        const dp = await getDataPath();
+        if (dp) setDataPathValue(dp);
       };
       loadData();
   }, []);
@@ -38,9 +47,9 @@ const Settings: React.FC = () => {
       e.preventDefault();
       try {
           await StorageService.saveSettings(settings);
-          alert('Settings saved successfully!');
+          toast.success('Settings Saved', 'Settings saved successfully!');
       } catch (err) {
-          alert('Failed to save settings. Storage might be full.');
+          toast.error('Save Failed', 'Failed to save settings. Storage might be full.');
       }
   };
 
@@ -103,11 +112,15 @@ const Settings: React.FC = () => {
   const handleUpdateUser = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!newUsername || !newPassword) {
-          alert("Username and Password required");
+          toast.warning('Missing Fields', 'Username and Password required');
+          return;
+      }
+      if (newPassword.length < 6) {
+          toast.warning('Weak Password', 'Password must be at least 6 characters long');
           return;
       }
       if (newPassword !== confirmPassword) {
-          alert("Passwords do not match");
+          toast.warning('Password Mismatch', 'Passwords do not match');
           return;
       }
 
@@ -124,20 +137,25 @@ const Settings: React.FC = () => {
       setNewUsername('');
       setNewPassword('');
       setConfirmPassword('');
-      alert("User updated/created successfully");
+      toast.success('User Saved', 'User updated/created successfully');
   };
 
   const clearData = async () => {
-      if (window.confirm("CRITICAL WARNING: This will delete ALL bills, customers, and products. Are you sure?")) {
-          if(window.prompt("Type 'DELETE' to confirm") === 'DELETE') {
-             try {
-                 await StorageService.clearAllData();
-                 alert('All data cleared successfully. Page will reload.');
-                 window.location.reload();
-             } catch (err) {
-                 console.error('Failed to clear data:', err);
-                 alert('Failed to clear data: ' + (err as Error).message);
-             }
+      const confirmed = await toast.confirm({
+          title: 'Clear All Data',
+          message: 'CRITICAL WARNING: This will delete ALL bills, customers, and products. This cannot be undone.',
+          confirmText: 'Delete All',
+          danger: true,
+          requiredInput: 'DELETE'
+      });
+      if (confirmed) {
+          try {
+              await StorageService.clearAllData();
+              toast.success('Data Cleared', 'All data cleared successfully. Page will reload.');
+              setTimeout(() => window.location.reload(), 1500);
+          } catch (err) {
+              console.error('Failed to clear data:', err);
+              toast.error('Clear Failed', 'Failed to clear data: ' + (err as Error).message);
           }
       }
   };
@@ -146,16 +164,42 @@ const Settings: React.FC = () => {
       try {
           setBackupStatus({ status: 'loading' });
           const backupContent = await StorageService.exportBackupFile();
-          const element = document.createElement('a');
-          const file = new Blob([backupContent], { type: 'application/json' });
-          element.href = URL.createObjectURL(file);
-          element.download = `nhw-backup-${new Date().toISOString().split('T')[0]}.json`;
-          document.body.appendChild(element);
-          element.click();
-          document.body.removeChild(element);
-          URL.revokeObjectURL(element.href);
-          setBackupStatus({ status: 'success', message: 'Backup downloaded successfully!' });
-          setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
+          const fileName = `nhw-backup-${new Date().toISOString().split('T')[0]}.json`;
+
+          try {
+            // Use Tauri native save dialog, defaulting to the backups folder
+            const { save } = await import('@tauri-apps/plugin-dialog');
+            const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+            const { getBackupsPath } = await import('../services/dataPath');
+
+            const backupsDir = await getBackupsPath();
+            const defaultPath = backupsDir ? `${backupsDir}\\${fileName}` : fileName;
+
+            const filePath = await save({
+              defaultPath,
+              filters: [{ name: 'JSON Files', extensions: ['json'] }],
+            });
+
+            if (filePath) {
+              await writeTextFile(filePath, backupContent);
+              setBackupStatus({ status: 'success', message: `Backup saved to: ${filePath}` });
+            } else {
+              setBackupStatus({ status: 'idle' });
+            }
+          } catch {
+            // Fallback: browser download
+            const blob = new Blob([backupContent], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            setBackupStatus({ status: 'success', message: 'Backup downloaded to your browser downloads folder.' });
+          }
+          setTimeout(() => setBackupStatus({ status: 'idle' }), 4000);
       } catch (err) {
           setBackupStatus({ status: 'error', message: 'Failed to create backup' });
           setTimeout(() => setBackupStatus({ status: 'idle' }), 3000);
@@ -206,6 +250,45 @@ const Settings: React.FC = () => {
       }
   };
 
+  const handleChangeDataPath = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const { mkdir, exists } = await import('@tauri-apps/plugin-fs');
+
+      const folder = await open({
+        directory: true,
+        multiple: false,
+        title: 'Select new location for Natural Health World data folder',
+      });
+
+      if (folder && typeof folder === 'string') {
+        setDataPathStatus({ status: 'loading' });
+        const newDataPath = `${folder}\\Natural Health World Data`;
+        const invoicesPath = `${newDataPath}\\invoices`;
+        const backupsPath = `${newDataPath}\\backups`;
+
+        if (!(await exists(newDataPath))) {
+          await mkdir(newDataPath, { recursive: true });
+        }
+        if (!(await exists(invoicesPath))) {
+          await mkdir(invoicesPath, { recursive: true });
+        }
+        if (!(await exists(backupsPath))) {
+          await mkdir(backupsPath, { recursive: true });
+        }
+
+        clearCachedPath();
+        await setDataPath(newDataPath);
+        setDataPathValue(newDataPath);
+        setDataPathStatus({ status: 'success', message: 'Data location updated successfully!' });
+        setTimeout(() => setDataPathStatus({ status: 'idle' }), 3000);
+      }
+    } catch (err) {
+      setDataPathStatus({ status: 'error', message: `Failed to change data location: ${(err as Error).message}` });
+      setTimeout(() => setDataPathStatus({ status: 'idle' }), 3000);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto pb-10">
       <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
@@ -231,20 +314,32 @@ const Settings: React.FC = () => {
               <div className="bg-white p-6 rounded-xl shadow-sm border space-y-4">
                   <h3 className="font-bold text-lg text-gray-700 mb-2 flex items-center"><FileText className="mr-2" size={20}/> Company Details</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="col-span-2 flex items-center gap-4 p-4 bg-gray-50 rounded border">
-                          {settings.logo ? <img src={settings.logo} alt="Logo" className="h-16 w-auto object-contain" /> : <div className="h-16 w-16 bg-gray-200 rounded flex items-center justify-center text-gray-400 text-xs">No Logo</div>}
-                          <div className="flex-1">
-                              <label className="cursor-pointer bg-white border border-gray-300 px-3 py-1 rounded text-sm hover:bg-gray-50 shadow-sm flex items-center inline-flex"><Upload size={14} className="mr-2"/> Upload Logo<input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} /></label>
-                              {logoUploadStatus.status !== 'idle' && (
-                                  <div className={`mt-2 text-xs font-medium ${logoUploadStatus.status === 'success' ? 'text-green-600' : logoUploadStatus.status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>
-                                      {logoUploadStatus.status === 'loading' && '⏳ '}
-                                      {logoUploadStatus.status === 'success' && '✓ '}
-                                      {logoUploadStatus.status === 'error' && '✗ '}
-                                      {logoUploadStatus.message}
+                      <div className="col-span-2 p-4 bg-gray-50 rounded border">
+                          <label className="label mb-2">Company Logo</label>
+                          <div className="flex items-start gap-4">
+                              {settings.logo ? (
+                                  <div className="relative group">
+                                      <img src={settings.logo} alt="Logo" className="h-20 w-auto object-contain rounded border bg-white p-1" />
+                                      <button type="button" onClick={() => setSettings({...settings, logo: ''})} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow opacity-0 group-hover:opacity-100 transition-opacity" title="Remove">&times;</button>
                                   </div>
-                              )}
+                              ) : null}
+                              <div className="flex-1">
+                                  <label className="cursor-pointer flex flex-col items-center justify-center border-2 border-dashed border-gray-300 hover:border-green-400 rounded-lg p-4 transition-colors bg-white hover:bg-green-50/50">
+                                      <Upload size={24} className="text-gray-400 mb-1" />
+                                      <span className="text-sm text-gray-500">Click to upload logo</span>
+                                      <span className="text-xs text-gray-400 mt-1">PNG, JPG, SVG — max 5MB</span>
+                                      <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
+                                  </label>
+                                  {logoUploadStatus.status !== 'idle' && (
+                                      <div className={`mt-2 text-xs font-medium ${logoUploadStatus.status === 'success' ? 'text-green-600' : logoUploadStatus.status === 'error' ? 'text-red-600' : 'text-blue-600'}`}>
+                                          {logoUploadStatus.status === 'loading' && '⏳ '}
+                                          {logoUploadStatus.status === 'success' && '✓ '}
+                                          {logoUploadStatus.status === 'error' && '✗ '}
+                                          {logoUploadStatus.message}
+                                      </div>
+                                  )}
+                              </div>
                           </div>
-                          {settings.logo && <button type="button" onClick={() => setSettings({...settings, logo: ''})} className="text-red-500 text-sm hover:underline whitespace-nowrap">Remove</button>}
                       </div>
                       <div><label className="label">Company Name</label><input required className="input" value={settings.name} onChange={e => setSettings({...settings, name: e.target.value})} /></div>
                       <div><label className="label">Tagline</label><input className="input" value={settings.tagline} onChange={e => setSettings({...settings, tagline: e.target.value})} /></div>
@@ -256,6 +351,7 @@ const Settings: React.FC = () => {
                       <div><label className="label">Email</label><input type="email" required className="input" value={settings.email} onChange={e => setSettings({...settings, email: e.target.value})} /></div>
                       <div><label className="label">Instagram Handle</label><input className="input" value={settings.instagram || ''} onChange={e => setSettings({...settings, instagram: e.target.value})} /></div>
                       <div><label className="label">GSTIN</label><input className="input" value={settings.gstin} onChange={e => setSettings({...settings, gstin: e.target.value})} /></div>
+                      <div><label className="label">PAN Number</label><input className="input" placeholder="e.g. ABCDE1234F" maxLength={10} value={settings.panNumber || ''} onChange={e => setSettings({...settings, panNumber: e.target.value.toUpperCase()})} /></div>
                       <div><label className="label">State Name</label><input className="input" value={settings.stateName || ''} onChange={e => setSettings({...settings, stateName: e.target.value})} /></div>
                       <div><label className="label">State Code</label><input className="input" value={settings.stateCode || ''} onChange={e => setSettings({...settings, stateCode: e.target.value})} /></div>
                   </div>
@@ -294,6 +390,59 @@ const Settings: React.FC = () => {
                          <div className="col-span-2"><label className="label">Footer Text</label><input className="input" value={settings.footerText || ''} onChange={e => setSettings({...settings, footerText: e.target.value})} /></div>
                          <div className="col-span-2"><label className="label">Terms & Conditions</label><textarea className="input h-32 font-mono text-xs" value={settings.terms || ''} onChange={e => setSettings({...settings, terms: e.target.value})} /></div>
                      </div>
+                 </div>
+
+                 {/* Live Invoice Preview */}
+                 <div className="border-t pt-4">
+                     <h3 className="font-bold text-lg text-gray-700 mb-4 flex items-center"><FileText className="mr-2" size={20}/> Invoice Preview</h3>
+                     <div id="invoice-preview" className="bg-white border-2 border-dashed border-gray-200 rounded-lg p-6 text-sm" style={{fontFamily: 'serif'}}>
+                         <div className="flex justify-between items-start mb-4 border-b pb-3">
+                             <div className="flex items-start gap-3">
+                                 {settings.logo ? (
+                                     <img src={settings.logo} alt="Logo" className="h-12 w-auto object-contain" />
+                                 ) : (
+                                     <div className="h-12 w-12 bg-gray-100 rounded flex items-center justify-center text-[10px] text-gray-400 border">Logo</div>
+                                 )}
+                                 <div>
+                                     <h4 className="text-lg font-bold text-gray-900">{settings.name || 'Company Name'}</h4>
+                                     <p className="text-xs text-gray-500">{settings.tagline || 'Tagline'}</p>
+                                     <p className="text-[10px] text-gray-400 mt-1">{settings.address || 'Address'}</p>
+                                     {settings.gstin && <p className="text-[10px] text-gray-400">GSTIN: {settings.gstin}</p>}
+                                     {settings.panNumber && <p className="text-[10px] text-gray-400">PAN: {settings.panNumber}</p>}
+                                 </div>
+                             </div>
+                             <div className="text-right">
+                                 <p className="text-xs font-bold text-gray-700">INVOICE</p>
+                                 <p className="text-sm font-bold text-blue-600">{settings.invoicePrefix || 'INV'}-001</p>
+                                 <p className="text-[10px] text-gray-500">Date: {new Date().toLocaleDateString()}</p>
+                             </div>
+                         </div>
+                         <div className="grid grid-cols-2 gap-4 mb-3 text-[10px]">
+                             <div>
+                                 <p className="font-bold text-gray-600 mb-1">BILL TO:</p>
+                                 <p className="text-gray-500">Customer Name</p>
+                                 <p className="text-gray-400">Phone / Address</p>
+                             </div>
+                             <div className="text-right">
+                                 <p className="font-bold text-gray-600 mb-1">DETAILS:</p>
+                                 <p className="text-gray-500">Sales Person: Rep Name</p>
+                             </div>
+                         </div>
+                         <table className="w-full text-[10px] mb-3 border-collapse">
+                             <thead><tr className="bg-gray-100 border-b"><th className="p-1.5 text-left">Item</th><th className="p-1.5 text-center">Qty</th><th className="p-1.5 text-right">Rate</th><th className="p-1.5 text-right">Amount</th></tr></thead>
+                             <tbody>
+                                 <tr className="border-b border-gray-100"><td className="p-1.5">Sample Product</td><td className="p-1.5 text-center">2</td><td className="p-1.5 text-right">₹500.00</td><td className="p-1.5 text-right font-semibold">₹1,000.00</td></tr>
+                             </tbody>
+                         </table>
+                         <div className="text-right text-xs font-bold text-gray-700 mb-3">Grand Total: ₹1,000.00</div>
+                         {/* Bank Details Preview */}
+                         <div className="border-t pt-2 text-[10px] text-gray-500">
+                             <p className="font-semibold text-gray-600">Bank Details:</p>
+                             <p>{settings.gstBankName || 'Bank Name'} | A/C: {settings.gstAccountNo || 'XXXX'} | IFSC: {settings.gstIfsc || 'XXXX'}</p>
+                         </div>
+                         {settings.footerText && <p className="text-center text-[10px] text-gray-400 mt-2 border-t pt-2">{settings.footerText}</p>}
+                     </div>
+                     <p className="text-xs text-gray-400 mt-2 text-center italic">This preview updates as you type. Save settings to apply.</p>
                  </div>
               </div>
           )}
@@ -350,6 +499,44 @@ const Settings: React.FC = () => {
               <div className="bg-white p-6 rounded-xl shadow-sm border space-y-6">
                   <h3 className="font-bold text-lg text-gray-700 flex items-center"><Database className="mr-2" size={20} /> Data Management</h3>
                   
+                  {/* Data Location Section */}
+                  <div className="p-4 bg-green-50 border border-green-100 rounded-lg">
+                      <h4 className="font-bold text-green-700 mb-3 flex items-center"><FolderOpen size={18} className="mr-2" /> Data Storage Location</h4>
+                      <p className="text-sm text-green-600 mb-3">This is where your invoices and backups are saved. These folders are <strong>not removed</strong> when you uninstall the app.</p>
+                      {dataPathValue ? (
+                        <div className="mb-3">
+                          <div className="font-mono text-xs bg-green-100 text-green-800 p-3 rounded border border-green-200">
+                            <div>📁 {dataPathValue}</div>
+                            <div className="ml-4">📁 invoices</div>
+                            <div className="ml-4">📁 backups</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-500 mb-3 italic">No data location configured.</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleChangeDataPath}
+                        className="px-4 py-2 bg-green-600 text-white rounded shadow hover:bg-green-700 flex items-center font-medium"
+                      >
+                        <FolderOpen size={18} className="mr-2" /> {dataPathValue ? 'Change Location' : 'Set Location'}
+                      </button>
+                      {dataPathStatus.status !== 'idle' && (
+                          <div className={`mt-3 text-sm font-medium p-2 rounded-lg ${
+                              dataPathStatus.status === 'success'
+                                  ? 'bg-green-100 text-green-700'
+                                  : dataPathStatus.status === 'error'
+                                  ? 'bg-red-100 text-red-700'
+                                  : 'bg-blue-100 text-blue-700'
+                          }`}>
+                              {dataPathStatus.status === 'loading' && '⏳ '}
+                              {dataPathStatus.status === 'success' && '✓ '}
+                              {dataPathStatus.status === 'error' && '✗ '}
+                              {dataPathStatus.message}
+                          </div>
+                      )}
+                  </div>
+
                   {/* Backup Section */}
                   <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
                       <h4 className="font-bold text-blue-700 mb-3">Backup & Restore</h4>
@@ -408,12 +595,6 @@ const Settings: React.FC = () => {
               </div>
           )}
       </form>
-      
-      <style>{`
-        .label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem; }
-        .input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; outline: none; transition: border-color 0.15s; }
-        .input:focus { border-color: ${COLORS.sageGreen}; ring: 2px solid ${COLORS.sageGreen}; }
-      `}</style>
     </div>
   );
 };

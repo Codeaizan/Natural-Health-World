@@ -2,11 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StorageService } from '../services/storage';
 import { Product, Customer, SalesPerson, CartItem, Bill, BillItem, CompanySettings } from '../types';
 import { COLORS } from '../constants';
-import { Search, Plus, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, MapPin, Download } from 'lucide-react';
+import { Search, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, Download } from 'lucide-react';
 import { searchMatch, numberToWords } from '../utils';
+import { useToast } from '../components/Toast';
 import html2pdf from 'html2pdf.js';
 
 const Billing: React.FC = () => {
+  const toast = useToast();
   // State
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -22,10 +24,11 @@ const Billing: React.FC = () => {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [customerSearch, setCustomerSearch] = useState('');
   
-  const [selectedSalesPerson, setSelectedSalesPerson] = useState<number>(1);
+  const [selectedSalesPerson, setSelectedSalesPerson] = useState<number>(0);
   const [isGstBill, setIsGstBill] = useState(false);
 
   const [lastBill, setLastBill] = useState<Bill | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Ref for PDF download
   const printableRef = useRef<HTMLDivElement>(null);
@@ -44,6 +47,9 @@ const Billing: React.FC = () => {
       setCustomers(customersData);
       setSalesPersons(salespersonsData);
       setSettings(settingsData);
+      // Default to first active sales person
+      const firstActive = salespersonsData.find(sp => sp.isActive);
+      if (firstActive) setSelectedSalesPerson(firstActive.id);
     };
     loadData();
   }, []);
@@ -57,7 +63,7 @@ const Billing: React.FC = () => {
     
     // Check if immediate quantity exceeds stock
     if (quantity > selectedProduct.currentStock) {
-        alert(`Insufficient stock! Available: ${selectedProduct.currentStock}, Requested: ${quantity}`);
+        toast.warning('Insufficient Stock', `Available: ${selectedProduct.currentStock}, Requested: ${quantity}`);
         return;
     }
 
@@ -66,7 +72,7 @@ const Billing: React.FC = () => {
         // Update
         const newQty = existingItem.quantity + quantity;
         if (newQty > selectedProduct.currentStock) {
-            alert(`Cannot add more than stock! Available: ${selectedProduct.currentStock}, Already in cart: ${existingItem.quantity}, Adding: ${quantity}`);
+            toast.warning('Stock Limit', `Available: ${selectedProduct.currentStock}, In cart: ${existingItem.quantity}, Adding: ${quantity}`);
             return;
         }
         setCart(cart.map(item => item.id === selectedProduct.id ? { ...item, quantity: newQty, totalAmount: newQty * item.sellingPrice } : item));
@@ -100,69 +106,108 @@ const Billing: React.FC = () => {
     ));
   };
 
-  const clearCart = () => {
-      if (cart.length > 0 && window.confirm("Are you sure you want to clear the cart?")) {
-          setCart([]);
+  const updateCartItemBatchNumber = (id: number, batchNumber: string) => {
+    setCart(cart.map(item =>
+      item.id === id
+        ? { ...item, batchNumber }
+        : item
+    ));
+  };
+
+  const clearCart = async () => {
+      if (cart.length > 0) {
+          const ok = await toast.confirm({ title: 'Clear Cart', message: 'Are you sure you want to clear the cart?', danger: true, confirmText: 'Clear' });
+          if (ok) setCart([]);
       }
   };
 
-  const downloadBillAsPDF = (bill: Bill) => {
+  const downloadBillAsPDF = async (bill: Bill) => {
     // Wait a tick for DOM to update, then capture
-    setTimeout(() => {
-      const element = printableRef.current;
-      if (!element) {
-        alert('Bill not ready for download');
-        return;
-      }
+    await new Promise(resolve => setTimeout(resolve, 100));
 
-      const opt = {
-        margin: 5,
-        filename: `${bill.invoiceNumber}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2 },
-        jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+    const element = printableRef.current;
+    if (!element) {
+      toast.error('Download Failed', 'Bill not ready for download.');
+      return;
+    }
+
+    const opt = {
+      margin: 5,
+      filename: `${bill.invoiceNumber}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
+    };
+
+    try {
+      // Strip oklch() colors that html2pdf/html2canvas can't parse
+      const stripOklch = (el: HTMLElement) => {
+        el.querySelectorAll('*').forEach(node => {
+          const s = (node as HTMLElement).style;
+          if (s) {
+            const cs = getComputedStyle(node as HTMLElement);
+            if (cs.color?.includes('oklch')) s.color = '#1f2937';
+            if (cs.backgroundColor?.includes('oklch')) s.backgroundColor = 'transparent';
+            if (cs.borderColor?.includes('oklch')) s.borderColor = '#e5e7eb';
+          }
+        });
       };
+      stripOklch(element);
 
-      // Check if running in Electron
-      const electronAPI = (window as any).electron;
-      if (electronAPI) {
-        // Save via Electron to Desktop/invoices
-        html2pdf()
-          .set(opt)
-          .from(element)
-          .outputPdf('blob')
-          .then((blob: Blob) => {
-            const reader = new FileReader();
-            reader.onload = async () => {
-              const arrayBuffer = reader.result as ArrayBuffer;
-              const result = await electronAPI.savePdfBlob(`${bill.invoiceNumber}.pdf`, arrayBuffer);
-              if (result.success) {
-                console.log(`✓ Bill saved to Desktop/invoices/${bill.invoiceNumber}.pdf`);
-              } else {
-                console.error('Failed to save bill:', result.error);
-                alert('Failed to save bill: ' + result.error);
-              }
-            };
-            reader.readAsArrayBuffer(blob);
-          });
-      } else {
-        // Fallback: Browser download
-        html2pdf().set(opt).from(element).save();
+      // Generate PDF as blob
+      const pdfBlob: Blob = await html2pdf().set(opt).from(element).outputPdf('blob');
+      const arrayBuffer = await pdfBlob.arrayBuffer();
+      const pdfBytes = new Uint8Array(arrayBuffer);
+
+      try {
+        // Use Tauri native save dialog
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const { writeFile } = await import('@tauri-apps/plugin-fs');
+        const { getInvoicesPath } = await import('../services/dataPath');
+
+        const invoicesDir = await getInvoicesPath();
+        const defaultPath = invoicesDir
+          ? `${invoicesDir}\\${bill.invoiceNumber}.pdf`
+          : `${bill.invoiceNumber}.pdf`;
+
+        const filePath = await save({
+          defaultPath,
+          filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
+        });
+
+        if (filePath) {
+          await writeFile(filePath, pdfBytes);
+          toast.success('Invoice Saved', filePath);
+        }
+      } catch {
+        // Fallback: browser download
+        const url = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${bill.invoiceNumber}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success('Invoice Downloaded', 'Saved to your browser downloads folder.');
       }
-    }, 100);
+    } catch (err) {
+      console.error('PDF download failed:', err);
+      toast.error('Download Failed', 'Failed to generate invoice PDF. Please try again.');
+    }
   };
 
   const handleAddNewCustomer = async (e: React.FormEvent) => {
       e.preventDefault();
       if(!newCustomer.name || !newCustomer.phone) {
-          alert("Name and Phone are required");
+          toast.warning('Missing Fields', 'Name and Phone are required.');
           return;
       }
        // Basic GSTIN Validation
        if (newCustomer.gstin) {
         const gstinRegex = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
         if (!gstinRegex.test(newCustomer.gstin)) {
-            alert('Invalid GSTIN format. It should be 15 characters.');
+            toast.warning('Invalid GSTIN', 'GSTIN should be 15 characters in the correct format.');
             return;
         }
       }
@@ -245,17 +290,18 @@ const Billing: React.FC = () => {
   const totals = calculateBillTotals();
 
   const handleGenerateBill = async () => {
+    if (isSaving) return;
     if (cart.length === 0) return;
     if (!settings) {
-        alert('Settings not loaded yet. Please wait and try again.');
+        toast.warning('Not Ready', 'Settings not loaded yet. Please wait and try again.');
         return;
     }
     if (!selectedCustomer) {
-        alert('Please select a customer');
+        toast.warning('No Customer', 'Please select a customer.');
         return;
     }
     if (isGstBill && !selectedCustomer.gstin) {
-        alert('GST Bill requires Customer GSTIN');
+        toast.warning('GSTIN Required', 'GST Bill requires Customer GSTIN.');
         return;
     }
 
@@ -264,11 +310,11 @@ const Billing: React.FC = () => {
     
     // Strict Check: Must be valid and ACTIVE
     if (!salesPerson) {
-        alert('Invalid Sales Person');
+        toast.error('Invalid Sales Person', 'Selected Sales Person does not exist.');
         return;
     }
     if (!salesPerson.isActive) {
-        alert('Selected Sales Person is not active. Please select a valid Sales Person.');
+        toast.warning('Inactive Sales Person', 'Selected Sales Person is not active. Please select a valid one.');
         return;
     }
 
@@ -291,8 +337,10 @@ const Billing: React.FC = () => {
         };
     });
 
-    const invoiceNumber = await StorageService.getNextInvoiceNumber();
-    const newBill: Bill = {
+    setIsSaving(true);
+    try {
+      const invoiceNumber = await StorageService.getNextInvoiceNumber();
+      const newBill: Bill = {
         id: 0,
         invoiceNumber,
         date: new Date().toISOString(),
@@ -313,30 +361,27 @@ const Billing: React.FC = () => {
         roundOff: totals.roundOff,
         grandTotal: totals.grandTotal,
         items: billItems
-    };
+      };
 
-    await StorageService.saveBill(newBill);
-    setLastBill(newBill);
-    // Clear cart
-    setCart([]);
-    setSelectedCustomer(null);
-    setCustomerSearch('');
-    // Refresh products to update stock
-    const updatedProducts = await StorageService.getProducts();
-    setProducts(updatedProducts);
+      await StorageService.saveBill(newBill);
+      setLastBill(newBill);
+      // Clear cart
+      setCart([]);
+      setSelectedCustomer(null);
+      setCustomerSearch('');
+      // Refresh products to update stock
+      const updatedProducts = await StorageService.getProducts();
+      setProducts(updatedProducts);
+    } catch (err) {
+      console.error('Error generating bill:', err);
+      toast.error('Bill Failed', 'Failed to save bill. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const InvoiceView = ({ bill }: { bill: Bill }) => {
-      const [settings, setInvoiceSettings] = useState<CompanySettings | null>(null);
-      
-      React.useEffect(() => {
-        const loadSettings = async () => {
-          const data = await StorageService.getSettings();
-          setInvoiceSettings(data);
-        };
-        loadSettings();
-      }, []);
-
+      // Use parent settings (already loaded) to avoid redundant async fetch
       if (!settings) {
         return <div className="p-4 text-center text-gray-500">Loading invoice...</div>;
       }
@@ -378,7 +423,7 @@ const Billing: React.FC = () => {
                     </div>
                 </div>
                 <div className="text-right">
-                    <h2 className="text-2xl font-bold uppercase tracking-widest text-gray-400">Tax Invoice</h2>
+                    <h2 className="text-2xl font-bold uppercase tracking-widest text-gray-400">{bill.isGstBill ? 'Tax Invoice' : 'Invoice'}</h2>
                     <div className="mt-4">
                         <p className="text-gray-500 text-xs uppercase">Invoice No</p>
                         <p className="font-bold text-lg">{bill.invoiceNumber}</p>
@@ -387,42 +432,24 @@ const Billing: React.FC = () => {
                         <p className="text-gray-500 text-xs uppercase">Date</p>
                         <p className="font-bold">{new Date(bill.date).toLocaleDateString()}</p>
                     </div>
-                     <div className="mt-4 p-2 bg-gray-50 rounded border text-xs text-left">
+                     {bill.isGstBill && (
+                      <div className="mt-4 p-2 bg-gray-50 rounded border text-xs text-left">
                         <p><span className="font-semibold">GSTIN:</span> {settings.gstin}</p>
+                        {settings.panNumber && <p><span className="font-semibold">PAN:</span> {settings.panNumber}</p>}
                         {settings.stateName && <p><span className="font-semibold">State:</span> {settings.stateName} ({settings.stateCode})</p>}
-                    </div>
+                      </div>
+                     )}
                 </div>
             </div>
 
-            {/* Customer & Shipping */}
-            <div className="flex justify-between mb-6 bg-gray-50 p-4 rounded border border-gray-100">
-                <div className="w-1/2 pr-4 border-r border-gray-200">
+            {/* Customer Details */}
+            <div className="mb-6 bg-gray-50 p-4 rounded border border-gray-100">
+                <div>
                     <h3 className="font-bold text-gray-600 uppercase text-xs mb-2">Billed To</h3>
                     <p className="font-bold text-lg text-gray-800">{bill.customerName}</p>
                     <p className="text-gray-700">{bill.customerPhone}</p>
                     <p className="max-w-xs text-gray-600 text-xs mt-1">{bill.customerAddress}</p>
                     {bill.customerGstin && <p className="font-mono text-xs mt-2 font-bold bg-white inline-block px-1 border">GSTIN: {bill.customerGstin}</p>}
-                </div>
-                {/* Bank Details */}
-                <div className="w-1/2 pl-4 text-xs">
-                     <h3 className="font-bold text-gray-600 uppercase text-xs mb-2">Bank Details</h3>
-                     {bill.isGstBill ? (
-                        <div className="space-y-1">
-                            <p><span className="text-gray-500 w-16 inline-block">Bank:</span> <span className="font-semibold">{settings.gstBankName}</span></p>
-                            <p><span className="text-gray-500 w-16 inline-block">A/c No:</span> <span className="font-mono font-bold">{settings.gstAccountNo}</span></p>
-                            <p><span className="text-gray-500 w-16 inline-block">IFSC:</span> <span className="font-mono">{settings.gstIfsc}</span></p>
-                            {settings.gstBranch && <p><span className="text-gray-500 w-16 inline-block">Branch:</span> {settings.gstBranch}</p>}
-                            {settings.gstUpi && <p><span className="text-gray-500 w-16 inline-block">UPI:</span> {settings.gstUpi}</p>}
-                        </div>
-                     ) : (
-                        <div className="space-y-1">
-                            <p><span className="text-gray-500 w-16 inline-block">Bank:</span> <span className="font-semibold">{settings.nonGstBankName || 'Cash'}</span></p>
-                            <p><span className="text-gray-500 w-16 inline-block">A/c No:</span> <span className="font-mono font-bold">{settings.nonGstAccountNo || '-'}</span></p>
-                            {settings.nonGstIfsc && <p><span className="text-gray-500 w-16 inline-block">IFSC:</span> <span className="font-mono">{settings.nonGstIfsc}</span></p>}
-                            {settings.nonGstBranch && <p><span className="text-gray-500 w-16 inline-block">Branch:</span> {settings.nonGstBranch}</p>}
-                            {settings.nonGstUpi && <p><span className="text-gray-500 w-16 inline-block">UPI:</span> {settings.nonGstUpi}</p>}
-                        </div>
-                     )}
                 </div>
             </div>
 
@@ -450,8 +477,8 @@ const Billing: React.FC = () => {
                                 </td>
                                 <td className="py-2 px-2 text-gray-500">{item.hsnCode}</td>
                                 <td className="py-2 px-2 text-gray-500">
-                                    <div>{item.batchNumber}</div>
-                                    <div>{item.expiryDate}</div>
+                                    {item.batchNumber && <div>{item.batchNumber}</div>}
+                                    {item.expiryDate && <div>{item.expiryDate.length === 7 ? `${item.expiryDate.split('-')[1]}/${item.expiryDate.split('-')[0]}` : item.expiryDate}</div>}
                                 </td>
                                 <td className="py-2 px-2 text-right font-bold">{item.quantity}</td>
                                 <td className="py-2 px-2 text-right">{item.rate.toFixed(2)}</td>
@@ -502,11 +529,33 @@ const Billing: React.FC = () => {
                 </div>
             </div>
 
-            <div className="mt-4 mb-8 break-inside-avoid">
+            <div className="mt-4 mb-4 break-inside-avoid">
                  <p className="text-gray-500 text-xs uppercase mb-1">Amount in Words:</p>
                  <p className="font-bold italic text-gray-800 bg-gray-50 p-2 rounded border border-gray-200">
                     {numberToWords(bill.grandTotal)}
                  </p>
+            </div>
+
+            {/* Bank Details */}
+            <div className="mb-8 p-3 bg-gray-50 rounded border border-gray-200 text-xs break-inside-avoid">
+                <h3 className="font-bold text-gray-600 uppercase text-xs mb-2">Bank Details for Payment</h3>
+                {bill.isGstBill ? (
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                        <p><span className="text-gray-500">Bank:</span> <span className="font-semibold">{settings.gstBankName}</span></p>
+                        <p><span className="text-gray-500">A/c No:</span> <span className="font-mono font-bold">{settings.gstAccountNo}</span></p>
+                        <p><span className="text-gray-500">IFSC:</span> <span className="font-mono">{settings.gstIfsc}</span></p>
+                        {settings.gstBranch && <p><span className="text-gray-500">Branch:</span> {settings.gstBranch}</p>}
+                        {settings.gstUpi && <p><span className="text-gray-500">UPI:</span> {settings.gstUpi}</p>}
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                        <p><span className="text-gray-500">Bank:</span> <span className="font-semibold">{settings.nonGstBankName || 'Cash'}</span></p>
+                        <p><span className="text-gray-500">A/c No:</span> <span className="font-mono font-bold">{settings.nonGstAccountNo || '-'}</span></p>
+                        {settings.nonGstIfsc && <p><span className="text-gray-500">IFSC:</span> <span className="font-mono">{settings.nonGstIfsc}</span></p>}
+                        {settings.nonGstBranch && <p><span className="text-gray-500">Branch:</span> {settings.nonGstBranch}</p>}
+                        {settings.nonGstUpi && <p><span className="text-gray-500">UPI:</span> {settings.nonGstUpi}</p>}
+                    </div>
+                )}
             </div>
             
             <div className="pt-8 border-t-2 border-dashed border-gray-300 flex justify-between items-end text-xs text-gray-500 break-inside-avoid mt-auto">
@@ -617,7 +666,8 @@ const Billing: React.FC = () => {
                         <th className="p-3 text-center">Qty</th>
                         <th className="p-3 text-right">Discount %</th>
                         <th className="p-3 text-right">Total</th>
-                        <th className="p-3">Expiry</th>
+                        <th className="p-3">Batch No.</th>
+                        <th className="p-3">Expiry (MM/YY)</th>
                         <th className="p-3 w-10"></th>
                     </tr>
                 </thead>
@@ -627,7 +677,7 @@ const Billing: React.FC = () => {
                         const discount = item.discount || 0;
                         const discountedAmount = baseAmount * (1 - discount / 100);
                         return (
-                        <tr key={idx}>
+                        <tr key={item.id}>
                             <td className="p-3">{item.name}</td>
                             <td className="p-3 text-right">₹{item.sellingPrice}</td>
                             <td className="p-3 text-center">{item.quantity}</td>
@@ -644,7 +694,16 @@ const Billing: React.FC = () => {
                             <td className={`p-3 text-right ${discount > 0 ? 'font-bold text-green-700' : ''}`}>₹{discountedAmount.toFixed(2)}</td>
                             <td className="p-3">
                                 <input 
-                                    type="date" 
+                                    type="text" 
+                                    placeholder="Batch"
+                                    value={item.batchNumber || ''}
+                                    onChange={(e) => updateCartItemBatchNumber(item.id, e.target.value)}
+                                    className="w-24 px-2 py-1 border rounded text-sm bg-yellow-50 focus:ring-2 focus:ring-yellow-400 outline-none"
+                                />
+                            </td>
+                            <td className="p-3">
+                                <input 
+                                    type="month" 
                                     value={item.expiryDate || ''}
                                     onChange={(e) => updateCartItemExpiry(item.id, e.target.value)}
                                     className="px-2 py-1 border rounded text-sm bg-green-50 focus:ring-2 focus:ring-green-400 outline-none"
@@ -659,7 +718,7 @@ const Billing: React.FC = () => {
                     );
                     })}
                     {cart.length === 0 && (
-                        <tr><td colSpan={7} className="p-8 text-center text-gray-400">Cart is empty</td></tr>
+                        <tr><td colSpan={8} className="p-8 text-center text-gray-400">Cart is empty</td></tr>
                     )}
                 </tbody>
             </table>
@@ -792,8 +851,8 @@ const Billing: React.FC = () => {
 
     {/* New Customer Modal */}
     {isCustomerModalOpen && (
-        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-overlayFade">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 animate-slideUp">
                 <div className="flex justify-between items-center mb-4 border-b pb-2">
                     <h3 className="text-lg font-bold">Add New Customer</h3>
                     <button onClick={() => setIsCustomerModalOpen(false)}><X className="text-gray-400 hover:text-gray-600" /></button>
@@ -824,8 +883,8 @@ const Billing: React.FC = () => {
 
     {/* Print Preview Modal */}
     {lastBill && (
-        <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 md:p-6">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 md:p-6 animate-overlayFade">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-slideUp">
                 <div className="p-4 border-b flex justify-between items-center bg-gray-50 no-print">
                     <h3 className="font-bold text-lg text-gray-800 flex items-center">
                         <CheckCircle className="text-green-600 mr-2" size={20} />

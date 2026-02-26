@@ -2,11 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { Product } from '../types';
 import { StorageService } from '../services/storage';
 import { COLORS, CATEGORIES } from '../constants';
-import { Plus, Search, Trash2, Edit2, AlertCircle, Download, Upload, AlertTriangle, Filter, Calculator, History, X, DollarSign } from 'lucide-react';
+import { Plus, Search, Trash2, Edit2, AlertCircle, Download, Upload, Filter, Calculator, History, X, DollarSign } from 'lucide-react';
 import { searchMatch } from '../utils';
+import { useToast } from '../components/Toast';
+import { TableSkeleton } from '../components/Skeleton';
+import EmptyState from '../components/EmptyState';
 
 const Inventory: React.FC = () => {
+  const toast = useToast();
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterLowStock, setFilterLowStock] = useState(false);
   
@@ -36,6 +41,7 @@ const Inventory: React.FC = () => {
   const loadProducts = async () => {
     const productsData = await StorageService.getProducts();
     setProducts(productsData);
+    setLoading(false);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -71,9 +77,11 @@ const Inventory: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if(window.confirm('Are you sure you want to delete this product?')) {
+    const ok = await toast.confirm({ title: 'Delete Product', message: 'Are you sure you want to delete this product?', danger: true, confirmText: 'Delete' });
+    if (ok) {
         await StorageService.deleteProduct(id);
         await loadProducts();
+        toast.success('Product Deleted');
     }
   };
 
@@ -81,7 +89,7 @@ const Inventory: React.FC = () => {
       e.preventDefault();
       if(!stockProduct || stockQty <= 0) return;
       if(!stockNotes.trim()) {
-          alert("Please provide a note/reason for this adjustment.");
+          toast.warning('Note Required', 'Please provide a note/reason for this adjustment.');
           return;
       }
 
@@ -90,7 +98,7 @@ const Inventory: React.FC = () => {
       const current = Number(stockProduct.currentStock);
 
       if (stockAction === 'remove' && safeQty > current) {
-          alert("Cannot remove more stock than currently available.");
+          toast.error('Stock Error', 'Cannot remove more stock than currently available.');
           return;
       }
 
@@ -98,9 +106,7 @@ const Inventory: React.FC = () => {
       // The storage service adds this value to current stock.
       const quantityChange = stockAction === 'add' ? safeQty : -safeQty;
       
-      let historyReason: any = 'adjustment';
-      if (stockReason === 'restock') historyReason = 'restock';
-      else if (stockReason === 'return') historyReason = 'return';
+      let historyReason = stockReason || 'adjustment';
       
       await StorageService.updateStock(
           stockProduct.id, 
@@ -115,7 +121,8 @@ const Inventory: React.FC = () => {
   };
 
   const handleBulkUpdate = async () => {
-      if(!window.confirm(`Are you sure you want to apply this to ALL ${products.length} products?`)) return;
+      const ok = await toast.confirm({ title: 'Bulk Update', message: `Apply this to ALL ${products.length} products?`, confirmText: 'Apply' });
+      if (!ok) return;
       
       const updatedProducts = products.map(p => {
           if (bulkAction === 'price_increase') {
@@ -135,7 +142,7 @@ const Inventory: React.FC = () => {
       }
       await loadProducts();
       setIsBulkModalOpen(false);
-      alert("Bulk update complete.");
+      toast.success('Bulk Update Complete');
   };
 
   const resetStockForm = () => {
@@ -181,24 +188,25 @@ const Inventory: React.FC = () => {
   };
 
   // --- CSV Export/Import ---
-  const handleExport = (onlyLowStock: boolean = false) => {
+  const handleExport = async (onlyLowStock: boolean = false) => {
       const dataToExport = onlyLowStock 
         ? products.filter(p => p.currentStock <= p.minStockLevel)
         : products;
-      if(dataToExport.length === 0) { alert("No products to export."); return; }
-      const headers = ["Name", "Category", "HSN", "Unit", "Package Size", "Batch", "Expiry (YYYY-MM-DD)", "MRP", "Discount %", "Purchase Price", "GST %", "Stock", "Min Stock"];
+      if(dataToExport.length === 0) { toast.warning('Nothing to Export', 'No products to export.'); return; }
+      const headers = ["Name", "Category", "HSN", "Unit", "Package Size", "MRP", "Discount %", "Purchase Price", "GST %", "Stock", "Min Stock"];
+      const csvEscape = (val: string) => {
+          if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+              return `"${val.replace(/"/g, '""')}"`;
+          }
+          return val;
+      };
       const rows = dataToExport.map(p => [
-          `"${p.name.replace(/"/g, '""')}"`, p.category, p.hsnCode, p.unit, p.packageSize || '', p.batchNumber || '', p.expiryDate || '',
+          csvEscape(p.name), csvEscape(p.category), csvEscape(p.hsnCode), csvEscape(p.unit), csvEscape(p.packageSize || ''),
           p.mrp, p.discountPercent, p.purchasePrice, p.gstRate, p.currentStock, p.minStockLevel
       ].join(","));
-      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `inventory.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const csvContent = [headers.join(","), ...rows].join("\n");
+      const { saveCsvFile } = await import('../utils');
+      await saveCsvFile('inventory.csv', csvContent);
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -209,7 +217,7 @@ const Inventory: React.FC = () => {
           const text = evt.target?.result as string;
           try {
              const lines = text.split("\n").filter(l => l.trim());
-             if (lines.length < 2) { alert("CSV file is empty."); return; }
+             if (lines.length < 2) { toast.warning('Empty File', 'CSV file is empty.'); return; }
              
              // Parse header to determine column order
              const headerLine = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
@@ -221,7 +229,7 @@ const Inventory: React.FC = () => {
              const hasPackage = headers.some(h => h.includes('package') || h.includes('size'));
              
              if (!hasProduct || !hasMRP) {
-                 alert("CSV must have 'Product' and 'MRP' columns.");
+                 toast.error('Invalid CSV', "CSV must have 'Product' and 'MRP' columns.");
                  return;
              }
              
@@ -232,8 +240,8 @@ const Inventory: React.FC = () => {
              const categoryIdx = headers.findIndex(h => h.includes('category'));
              const hsnIdx = headers.findIndex(h => h.includes('hsn'));
              const unitIdx = headers.findIndex(h => h.includes('unit') && !h.includes('package'));
-             const batchIdx = headers.findIndex(h => h.includes('batch'));
-             const expiryIdx = headers.findIndex(h => h.includes('expiry'));
+             const _batchIdx = headers.findIndex(h => h.includes('batch'));
+             const _expiryIdx = headers.findIndex(h => h.includes('expiry'));
              const discIdx = headers.findIndex(h => h.includes('discount'));
              const purchIdx = headers.findIndex(h => h.includes('purchase'));
              const gstIdx = headers.findIndex(h => h.includes('gst'));
@@ -241,11 +249,13 @@ const Inventory: React.FC = () => {
              const minStockIdx = headers.findIndex(h => h.includes('min'));
              
              // Ask user if they want to clear existing products first
-             const clearFirst = window.confirm(
-                 'Do you want to clear all existing products before importing?\n\n' +
-                 'Click "OK" to clear and import fresh\n' +
-                 'Click "Cancel" to merge with existing products'
-             );
+             const clearFirst = await toast.confirm({
+                 title: 'Import Mode',
+                 message: 'Do you want to clear all existing products before importing?\n\nConfirm to clear and import fresh, Cancel to merge with existing products.',
+                 confirmText: 'Clear & Import',
+                 cancelText: 'Merge',
+                 danger: true
+             });
              
              if (clearFirst) {
                  await StorageService.deleteAllProducts();
@@ -290,8 +300,8 @@ const Inventory: React.FC = () => {
                      hsnCode: hsnIdx >= 0 ? (cols[hsnIdx] || '') : '',
                      unit: unit,
                      packageSize: packageSize,
-                     batchNumber: batchIdx >= 0 ? (cols[batchIdx] || '') : '',
-                     expiryDate: expiryIdx >= 0 ? (cols[expiryIdx] || '') : '',
+                     batchNumber: '',
+                     expiryDate: '',
                      mrp: mprNum,
                      discountPercent: discIdx >= 0 ? (parseFloat(cols[discIdx]) || 0) : 0,
                      purchasePrice: purchIdx >= 0 ? (parseFloat(cols[purchIdx]) || 0) : 0,
@@ -312,16 +322,16 @@ const Inventory: React.FC = () => {
              }
              
              if (count === 0) {
-                 alert("No valid products found. Please check CSV format.\n\nExpected columns: Product (or Name), MRP, and optionally: Package Size, Category, HSN, Unit, Batch, Expiry, Discount %, Purchase Price, GST %, Stock, Min Stock");
+                 toast.error('Import Failed', 'No valid products found. Check CSV format.');
              } else {
-                 let msg = `✓ Successfully imported ${count} products.`;
+                 let msg = `${count} products imported successfully.`;
                  if (errors.length > 0) {
-                     msg += `\n\n⚠ ${errors.length} rows failed:\n${errors.slice(0, 5).join('\n')}${errors.length > 5 ? '\n... and ' + (errors.length - 5) + ' more' : ''}`;
+                     msg += ` ${errors.length} rows failed.`;
                  }
-                 alert(msg);
+                 toast.success('Import Complete', msg);
              }
              await loadProducts();
-          } catch (err) { console.error(err); alert("Failed to parse CSV: " + (err as Error).message); }
+          } catch (err) { console.error(err); toast.error('CSV Error', 'Failed to parse CSV: ' + (err as Error).message); }
       };
       reader.readAsText(file);
       e.target.value = '';
@@ -399,6 +409,7 @@ const Inventory: React.FC = () => {
       </div>
 
       {/* Table */}
+      {loading ? <TableSkeleton rows={8} cols={5} /> : (
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -406,7 +417,6 @@ const Inventory: React.FC = () => {
                 <tr>
                 <th className="p-4 font-semibold">Name</th>
                 <th className="p-4 font-semibold">Stock</th>
-                <th className="p-4 font-semibold">Batch / Expiry</th>
                 <th className="p-4 font-semibold text-right">Purchase (Val)</th>
                 <th className="p-4 font-semibold text-right">MRP / Sell</th>
                 <th className="p-4 font-semibold text-right">Actions</th>
@@ -414,10 +424,9 @@ const Inventory: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-100">
                 {filteredProducts.map(p => {
-                    const isExpiring = checkExpiry(p.expiryDate);
                     const isLowStock = p.currentStock <= p.minStockLevel;
                     return (
-                    <tr key={p.id} className={`hover:bg-gray-50 transition-colors ${isExpiring ? 'bg-amber-50/50' : ''}`}>
+                    <tr key={p.id} className="hover:bg-gray-50 transition-colors">
                         <td className="p-4">
                             <div className="font-medium text-gray-800">{p.name}</div>
                             <div className="text-xs text-gray-500">{p.category} | {p.packageSize}</div>
@@ -425,10 +434,6 @@ const Inventory: React.FC = () => {
                         </td>
                         <td className={`p-4 font-bold ${isLowStock ? 'text-red-600' : 'text-green-600'}`}>
                             {p.currentStock} <span className="text-xs font-normal text-gray-400">{p.unit}</span>
-                        </td>
-                        <td className="p-4 text-sm">
-                            <div className="text-gray-700">{p.batchNumber || '-'}</div>
-                            {p.expiryDate && <div className={`flex items-center ${isExpiring ? 'text-amber-700 font-bold' : 'text-gray-500'}`}>{isExpiring && <AlertTriangle size={12} className="mr-1"/>}{p.expiryDate}</div>}
                         </td>
                         <td className="p-4 text-right">
                              {/* Exposed Purchase Price for Verification */}
@@ -449,16 +454,17 @@ const Inventory: React.FC = () => {
                         </td>
                     </tr>
                 )})}
-                {filteredProducts.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">No products found.</td></tr>}
+                {filteredProducts.length === 0 && <tr><td colSpan={6} className="p-0"><EmptyState type="inventory" title="No products found" description={search ? 'Try a different search term' : 'Add your first product to get started'} action={!search ? { label: 'Add Product', onClick: () => openNew() } : undefined} /></td></tr>}
             </tbody>
             </table>
         </div>
       </div>
+      )}
 
       {/* Product Edit/Add Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-slideUp">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center">
               <h3 className="text-xl font-bold text-gray-800">{currentProduct.id ? 'Edit Product' : 'New Product'}</h3>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">&times;</button>
@@ -471,8 +477,6 @@ const Inventory: React.FC = () => {
               <div><label className="label">Category</label><select className="input" value={currentProduct.category || ''} onChange={e => setCurrentProduct({...currentProduct, category: e.target.value})}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
               <div><label className="label">HSN Code</label><input className="input" value={currentProduct.hsnCode || ''} onChange={e => setCurrentProduct({...currentProduct, hsnCode: e.target.value})} /></div>
               <div><label className="label">Package Size</label><input className="input" placeholder="e.g. 100ml" value={currentProduct.packageSize || ''} onChange={e => setCurrentProduct({...currentProduct, packageSize: e.target.value})} /></div>
-              <div><label className="label">Batch Number</label><input className="input" value={currentProduct.batchNumber || ''} onChange={e => setCurrentProduct({...currentProduct, batchNumber: e.target.value})} /></div>
-              <div><label className="label">Expiry Date</label><input type="date" className="input" value={currentProduct.expiryDate || ''} onChange={e => setCurrentProduct({...currentProduct, expiryDate: e.target.value})} /></div>
               <div><label className="label">Current Stock</label><input type="number" className="input" value={currentProduct.currentStock || 0} onChange={e => setCurrentProduct({...currentProduct, currentStock: Number(e.target.value)})} /></div>
               <div><label className="label">Min Stock Level</label><input type="number" className="input" value={currentProduct.minStockLevel || 10} onChange={e => setCurrentProduct({...currentProduct, minStockLevel: Number(e.target.value)})} /></div>
               <div><label className="label">MRP *</label><input required type="number" step="0.01" className="input" value={currentProduct.mrp || ''} onChange={e => setCurrentProduct({...currentProduct, mrp: Number(e.target.value)})} /></div>
@@ -491,8 +495,8 @@ const Inventory: React.FC = () => {
 
       {/* Advanced Stock Adjustment Modal */}
       {isStockModalOpen && stockProduct && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-xl shadow-lg w-full max-w-md">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+              <div className="bg-white rounded-xl shadow-lg w-full max-w-md animate-slideUp">
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center">
                     <div>
                         <h3 className="text-lg font-bold text-gray-800">Adjust Stock</h3>
@@ -516,8 +520,8 @@ const Inventory: React.FC = () => {
 
       {/* Bulk Update Modal */}
       {isBulkModalOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-               <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+               <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6 animate-slideUp">
                    <h3 className="text-lg font-bold mb-4">Bulk Update</h3>
                    <div className="space-y-4">
                        <div>
@@ -540,13 +544,6 @@ const Inventory: React.FC = () => {
           </div>
       )}
 
-      <style>{`
-        .label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.25rem; }
-        .input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 0.5rem; outline: none; transition: border-color 0.15s; }
-        .input:focus { border-color: ${COLORS.sageGreen}; ring: 2px solid ${COLORS.sageGreen}; }
-        .btn-secondary { display: flex; align-items: center; padding: 0.5rem 0.75rem; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 0.5rem; font-size: 0.875rem; color: #374151; transition: background-color 0.15s; }
-        .btn-secondary:hover { background-color: #f3f4f6; }
-      `}</style>
     </div>
   );
 };

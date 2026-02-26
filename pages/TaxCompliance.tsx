@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useToast } from '../components/Toast';
 import { StorageService } from '../services/storage';
 import { TaxComplianceService } from '../services/compliance';
 import { Bill, GSTR1Data, GSTR2Data, TaxAuditLog, ComplianceAlert, TaxAdjustment } from '../types';
@@ -6,9 +7,6 @@ import {
   FileText,
   AlertTriangle,
   CheckCircle,
-  TrendingUp,
-  Calendar,
-  DollarSign,
   Download,
   Plus,
   X,
@@ -18,6 +16,7 @@ import {
 } from 'lucide-react';
 
 const TaxCompliance: React.FC = () => {
+  const toast = useToast();
   const [bills, setBills] = useState<Bill[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'gstr1' | 'gstr2' | 'reconciliation' | 'adjustments' | 'audit' | 'alerts'>('overview');
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
@@ -50,11 +49,11 @@ const TaxCompliance: React.FC = () => {
 
         // Load logs and alerts
         setAuditLogs(TaxComplianceService.getTaxAuditLogs());
-        setComplianceAlerts(TaxComplianceService.getComplianceAlerts());
         setAdjustments(TaxComplianceService.getTaxAdjustments());
 
-        // Check compliance
+        // Check compliance then reload alerts (checkCompliance may add new ones)
         TaxComplianceService.checkCompliance(billsData, settings);
+        setComplianceAlerts(TaxComplianceService.getComplianceAlerts());
       } catch (err) {
         console.error('Error loading tax compliance data:', err);
       } finally {
@@ -65,15 +64,20 @@ const TaxCompliance: React.FC = () => {
     loadData();
   }, [selectedMonth, selectedYear]);
 
-  const taxSummary = gstr1Data && TaxComplianceService.generateTaxSummary(bills, selectedMonth, selectedYear);
-  const reconciliation = gstr1Data && gstr2Data && TaxComplianceService.reconcileTaxes(selectedMonth, selectedYear);
+  const taxSummary = useMemo(() => {
+    return gstr1Data ? TaxComplianceService.generateTaxSummary(bills, selectedMonth, selectedYear) : null;
+  }, [gstr1Data, bills, selectedMonth, selectedYear]);
+
+  const reconciliation = useMemo(() => {
+    return (gstr1Data && gstr2Data) ? TaxComplianceService.reconcileTaxes(selectedMonth, selectedYear) : null;
+  }, [gstr1Data, gstr2Data, selectedMonth, selectedYear]);
 
   const handleFileGSTR1 = () => {
     if (gstr1Data) {
       const updated = { ...gstr1Data, status: 'filed' as const, filingDate: new Date().toISOString() };
       TaxComplianceService.saveGSTR1(updated);
       setGstr1Data(updated);
-      alert('GSTR-1 filed successfully');
+      toast.success('GSTR-1 Filed', 'GSTR-1 filed successfully');
     }
   };
 
@@ -82,21 +86,21 @@ const TaxCompliance: React.FC = () => {
       const updated = { ...gstr2Data, status: 'filed' as const, filingDate: new Date().toISOString() };
       TaxComplianceService.saveGSTR2(updated);
       setGstr2Data(updated);
-      alert('GSTR-2 filed successfully');
+      toast.success('GSTR-2 Filed', 'GSTR-2 filed successfully');
     }
   };
 
   const handleAddAdjustment = (type: 'tds' | 'excise') => {
     const amount = type === 'tds' ? parseFloat(tdsAmount) : parseFloat(exciseAmount);
     if (isNaN(amount) || amount <= 0) {
-      alert('Please enter a valid amount');
+      toast.warning('Invalid Amount', 'Please enter a valid amount');
       return;
     }
 
     const adjustment: TaxAdjustment = {
       id: `adj_${Date.now()}`,
       date: new Date().toISOString(),
-      type: type === 'tds' ? 'tds' : 'tcs',
+      type: type === 'tds' ? 'tds' : 'excise',
       amount,
       description: type === 'tds' ? `TDS @ 2% adjustment` : `Excise duty @ 5% adjustment`,
     };
@@ -111,6 +115,37 @@ const TaxCompliance: React.FC = () => {
   const handleDismissAlert = (alertId: string) => {
     TaxComplianceService.dismissAlert(alertId);
     setComplianceAlerts(complianceAlerts.filter(a => a.id !== alertId));
+  };
+
+  const handleExportGSTR = async (type: 'gstr1' | 'gstr2') => {
+    const data = type === 'gstr1' ? gstr1Data : gstr2Data;
+    if (!data) return;
+    const exportPayload = TaxComplianceService.exportForFiling(
+      type === 'gstr1' ? data as GSTR1Data : gstr1Data!,
+      type === 'gstr2' ? data as GSTR2Data : gstr2Data!
+    );
+    const jsonStr = JSON.stringify(type === 'gstr1' ? { gstr1: exportPayload.gstr1, items: (data as GSTR1Data).gstItems } : { gstr2: exportPayload.gstr2, items: (data as GSTR2Data).purchaseItems }, null, 2);
+    const filename = `${type}_${selectedYear}_${String(selectedMonth).padStart(2, '0')}.json`;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs');
+      const filePath = await save({ defaultPath: filename, filters: [{ name: 'JSON Files', extensions: ['json'] }] });
+      if (filePath) {
+        await writeTextFile(filePath, jsonStr);
+        toast.success('Export Complete', `${type.toUpperCase()} exported to: ${filePath}`);
+      }
+    } catch {
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success('Export Complete', `${type.toUpperCase()} downloaded`);
+    }
   };
 
   if (loading) {
@@ -318,7 +353,7 @@ const TaxCompliance: React.FC = () => {
                       <FileText size={18} />
                       {gstr1Data.status === 'filed' ? 'Filed' : 'File Now'}
                     </button>
-                    <button className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-2">
+                    <button onClick={() => handleExportGSTR('gstr1')} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-2">
                       <Download size={18} />
                       Export
                     </button>
@@ -387,7 +422,7 @@ const TaxCompliance: React.FC = () => {
                       <FileText size={18} />
                       {gstr2Data.status === 'filed' ? 'Filed' : 'File Now'}
                     </button>
-                    <button className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-2">
+                    <button onClick={() => handleExportGSTR('gstr2')} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-2">
                       <Download size={18} />
                       Export
                     </button>

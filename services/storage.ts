@@ -3,6 +3,7 @@
 // Falls back to IndexedDB (via Dexie) when running in a browser
 
 import type { CompanySettings, Product, Customer, Bill, SalesPerson, StockHistory, BackupRecord, User } from '../types';
+import { AuditLogService } from './auditLog';
 
 // Detect if running inside Tauri desktop app
 const isTauri = (): boolean => {
@@ -54,7 +55,8 @@ export const StorageService = {
   },
   saveSettings: async (settings: CompanySettings): Promise<void> => {
     const b = await getBackend();
-    return b.saveSettings(settings);
+    await b.saveSettings(settings);
+    AuditLogService.log('settings', 'Settings Updated', `Company settings updated for "${settings.name}"`);
   },
 
   // --- Auth & Users ---
@@ -82,11 +84,13 @@ export const StorageService = {
   },
   saveProduct: async (product: Product): Promise<void> => {
     const b = await getBackend();
-    return b.saveProduct(product);
+    await b.saveProduct(product);
+    AuditLogService.log('inventory', product.id ? 'Product Updated' : 'Product Added', `Product "${product.name}" (ID: ${product.id})`);
   },
   deleteProduct: async (id: number): Promise<void> => {
     const b = await getBackend();
-    return b.deleteProduct(id);
+    await b.deleteProduct(id);
+    AuditLogService.log('inventory', 'Product Deleted', `Product ID: ${id} deleted`);
   },
   deleteAllProducts: async (): Promise<void> => {
     const b = await getBackend();
@@ -100,11 +104,13 @@ export const StorageService = {
   },
   saveBill: async (bill: Bill): Promise<void> => {
     const b = await getBackend();
-    return b.saveBill(bill);
+    await b.saveBill(bill);
+    AuditLogService.log('billing', 'Bill Saved', `Invoice ${bill.invoiceNumber} for ${bill.customerName} - ₹${bill.grandTotal.toFixed(2)}`);
   },
   deleteBill: async (billId: number): Promise<void> => {
     const b = await getBackend();
-    return b.deleteBill(billId);
+    await b.deleteBill(billId);
+    AuditLogService.log('billing', 'Bill Deleted', `Bill ID: ${billId} deleted`);
   },
   getNextInvoiceNumber: async (): Promise<string> => {
     const b = await getBackend();
@@ -128,7 +134,8 @@ export const StorageService = {
   },
   saveCustomer: async (customer: Customer): Promise<void> => {
     const b = await getBackend();
-    return b.saveCustomer(customer);
+    await b.saveCustomer(customer);
+    AuditLogService.log('customer', customer.id ? 'Customer Updated' : 'Customer Added', `Customer "${customer.name}" (ID: ${customer.id})`);
   },
   mergeCustomers: async (fromId: number, toId: number): Promise<void> => {
     const b = await getBackend();
@@ -170,6 +177,7 @@ export const StorageService = {
   // --- Data Management ---
   clearAllData: async (): Promise<void> => {
     const b = await getBackend();
-    return b.clearAllData();
+    AuditLogService.log('data', 'All Data Cleared', 'User cleared all application data');
+    await b.clearAllData();
   }
 };

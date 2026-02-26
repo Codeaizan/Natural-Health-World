@@ -32,7 +32,7 @@ export const AnalyticsService = {
   /**
    * Generate Profit & Loss Statement for a period
    */
-  generateProfitLossStatement: (bills: Bill[], month: number, year: number): ProfitLossStatement => {
+  generateProfitLossStatement: (bills: Bill[], products: Product[], month: number, year: number): ProfitLossStatement => {
     // Filter bills for the period
     const periodBills = bills.filter(b => {
       const billDate = new Date(b.date);
@@ -42,18 +42,31 @@ export const AnalyticsService = {
     // Calculate revenue (gross sales)
     const revenue = periodBills.reduce((sum, b) => sum + b.grandTotal, 0);
 
-    // Calculate COGS (estimate: 60% of revenue for ayurvedic products)
-    const costOfGoodsSold = revenue * 0.6;
+    // Build a purchasePrice lookup from products
+    const purchasePriceMap: Record<number, number> = {};
+    products.forEach(p => { purchasePriceMap[p.id] = p.purchasePrice; });
+
+    // Calculate actual COGS from sold items' purchase prices
+    const costOfGoodsSold = periodBills.reduce((sum, b) => {
+      return sum + b.items.reduce((itemSum, item) => {
+        const purchasePrice = purchasePriceMap[item.productId] || 0;
+        return itemSum + (item.quantity * purchasePrice);
+      }, 0);
+    }, 0);
+
     const grossProfit = revenue - costOfGoodsSold;
     const grossProfitMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
 
-    // Operating expenses (estimate: 20% of revenue for overhead)
-    const operatingExpenses = revenue * 0.2;
+    // Operating expenses - GST collected is NOT a business expense (it's passed to govt)
+    // Use a minimal overhead estimate based on bill count (rent, utilities, salaries)
+    // NOTE: Without actual expense tracking, this remains an estimate
+    const operatingExpenses = 0; // Set to 0 — user should add actual OpEx tracking
     const operatingProfit = grossProfit - operatingExpenses;
     const operatingMargin = revenue > 0 ? (operatingProfit / revenue) * 100 : 0;
 
-    // Tax expense (18% GST + 2% TDS)
-    const taxExpense = periodBills.reduce((sum, b) => sum + b.totalTax, 0);
+    // Tax expense = income tax estimate (not GST, which is pass-through)
+    // Without income tax tracking, set to 0
+    const taxExpense = 0;
 
     const netProfit = operatingProfit - taxExpense;
     const netProfitMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
@@ -74,29 +87,77 @@ export const AnalyticsService = {
   },
 
   /**
-   * Generate Cash Flow Statement
+   * Compute net cash flow for a single month (helper)
    */
-  generateCashFlowStatement: (bills: Bill[], month: number, year: number): CashFlowStatement => {
+  _monthNetCashFlow: (bills: Bill[], products: Product[], month: number, year: number): number => {
+    const periodBills = bills.filter(b => {
+      const d = new Date(b.date);
+      return d.getMonth() + 1 === month && d.getFullYear() === year;
+    });
+    const revenue = periodBills.reduce((sum, b) => sum + b.grandTotal, 0);
+    const gstCollected = periodBills.reduce((sum, b) => sum + b.totalTax, 0);
+    const purchasePriceMap: Record<number, number> = {};
+    products.forEach(p => { purchasePriceMap[p.id] = p.purchasePrice; });
+    const cogs = periodBills.reduce((sum, b) =>
+      sum + b.items.reduce((s, item) => s + (item.quantity * (purchasePriceMap[item.productId] || 0)), 0)
+    , 0);
+    return revenue - cogs - gstCollected;
+  },
+
+  /**
+   * Generate Cash Flow Statement
+   * beginningCash is calculated as the cumulative net cash flow of all prior months.
+   */
+  generateCashFlowStatement: (bills: Bill[], products: Product[], month: number, year: number): CashFlowStatement => {
     const periodBills = bills.filter(b => {
       const billDate = new Date(b.date);
       return billDate.getMonth() + 1 === month && billDate.getFullYear() === year;
     });
 
-    // Operating cash flow = net income + adjustments
-    const netIncome = periodBills.reduce((sum, b) => sum + (b.grandTotal - b.totalTax), 0);
-    const operatingCashFlow = netIncome * 0.8; // Assume 80% converted to cash
-
-    // Investing cash flow (negative for purchases, estimate 10% of revenue)
+    // Operating cash flow = revenue received (grandTotal includes GST)
     const revenue = periodBills.reduce((sum, b) => sum + b.grandTotal, 0);
-    const investingCashFlow = -revenue * 0.1;
+    const gstCollected = periodBills.reduce((sum, b) => sum + b.totalTax, 0);
 
-    // Financing cash flow (0 for demo)
+    // Build purchasePrice lookup
+    const purchasePriceMap: Record<number, number> = {};
+    products.forEach(p => { purchasePriceMap[p.id] = p.purchasePrice; });
+
+    // COGS outflow (what was paid for the goods sold)
+    const cogs = periodBills.reduce((sum, b) => {
+      return sum + b.items.reduce((itemSum, item) => {
+        const pp = purchasePriceMap[item.productId] || 0;
+        return itemSum + (item.quantity * pp);
+      }, 0);
+    }, 0);
+
+    // Operating cash flow = revenue - COGS - GST (pass-through to govt)
+    const operatingCashFlow = revenue - cogs - gstCollected;
+
+    // Without actual investment/financing tracking, set to 0
+    const investingCashFlow = 0;
     const financingCashFlow = 0;
 
     const netCashFlow = operatingCashFlow + investingCashFlow + financingCashFlow;
 
-    // Estimate beginning and ending cash
-    const beginningCash = revenue * 0.3;
+    // Compute beginningCash as cumulative net cash flow of ALL prior months
+    // Find the earliest bill and iterate each month up to (but not including) the current one
+    let beginningCash = 0;
+    if (bills.length > 0) {
+      const allDates = bills.map(b => new Date(b.date));
+      const minDate = new Date(Math.min(...allDates.map(d => d.getTime())));
+      let curYear = minDate.getFullYear();
+      let curMonth = minDate.getMonth() + 1; // 1-indexed
+
+      while (curYear < year || (curYear === year && curMonth < month)) {
+        beginningCash += AnalyticsService._monthNetCashFlow(bills, products, curMonth, curYear);
+        curMonth++;
+        if (curMonth > 12) {
+          curMonth = 1;
+          curYear++;
+        }
+      }
+    }
+
     const endingCash = beginningCash + netCashFlow;
 
     return {
@@ -119,67 +180,23 @@ export const AnalyticsService = {
     method: 'fifo' | 'lifo' | 'weighted_avg' = 'fifo'
   ): InventoryValuation[] => {
     return products.map(product => {
-      // Get all sales for this product
-      const productSales = bills.flatMap(b =>
-        b.items
-          .filter(i => i.productId === product.id)
-          .map(i => ({
-            quantity: i.quantity,
-            rate: i.rate,
-            date: b.date,
-          }))
-      );
-
       const quantity = product.currentStock;
 
-      // FIFO: Assume oldest inventory is sold first
-      let fifoCost = 0;
-      let fifoComputedQty = quantity;
-      if (productSales.length > 0) {
-        const sortedSales = productSales.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        let remainingQty = quantity;
-        for (const sale of sortedSales) {
-          const qtyUsed = Math.min(remainingQty, sale.quantity);
-          fifoCost += qtyUsed * sale.rate;
-          remainingQty -= qtyUsed;
-          if (remainingQty <= 0) break;
-        }
-      }
-      const fifoValue = quantity * product.purchasePrice;
-
-      // LIFO: Assume newest inventory is sold first
-      let lifoCost = 0;
-      if (productSales.length > 0) {
-        const sortedSales = productSales.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        let remainingQty = quantity;
-        for (const sale of sortedSales) {
-          const qtyUsed = Math.min(remainingQty, sale.quantity);
-          lifoCost += qtyUsed * sale.rate;
-          remainingQty -= qtyUsed;
-          if (remainingQty <= 0) break;
-        }
-      }
-      const lifoValue = quantity * product.purchasePrice * 0.95; // Slight adjustment
-
-      // Weighted Average
-      const totalSalesQty = productSales.reduce((sum, s) => sum + s.quantity, 0);
-      const totalSalesValue = productSales.reduce((sum, s) => sum + s.quantity * s.rate, 0);
-      const avgRate = totalSalesQty > 0 ? totalSalesValue / totalSalesQty : product.purchasePrice;
-      const weightedAvgCost = quantity * avgRate;
-      const weightedAvgValue = quantity * product.purchasePrice;
-
-      const selectedMethod = method === 'fifo' ? fifoCost : method === 'lifo' ? lifoCost : weightedAvgCost;
+      // Note: Since this system tracks a single purchase price per product (no purchase lot/layer history),
+      // FIFO, LIFO, and Weighted Average all produce the same valuation: quantity × purchasePrice.
+      // If multiple purchase lots at different costs are added in the future, this logic should be updated.
+      const valuationAmount = quantity * product.purchasePrice;
 
       return {
         productId: product.id,
         productName: product.name,
         quantity,
-        fifoCost: parseFloat(fifoCost.toFixed(2)),
-        fifoValue: parseFloat(fifoValue.toFixed(2)),
-        lifoCost: parseFloat(lifoCost.toFixed(2)),
-        lifoValue: parseFloat(lifoValue.toFixed(2)),
-        weightedAvgCost: parseFloat(weightedAvgCost.toFixed(2)),
-        weightedAvgValue: parseFloat(weightedAvgValue.toFixed(2)),
+        fifoCost: parseFloat(valuationAmount.toFixed(2)),
+        fifoValue: parseFloat(valuationAmount.toFixed(2)),
+        lifoCost: parseFloat(valuationAmount.toFixed(2)),
+        lifoValue: parseFloat(valuationAmount.toFixed(2)),
+        weightedAvgCost: parseFloat(valuationAmount.toFixed(2)),
+        weightedAvgValue: parseFloat(valuationAmount.toFixed(2)),
         method,
       };
     });
@@ -313,7 +330,7 @@ export const AnalyticsService = {
           };
         }
         productSales[item.productId].quantity += item.quantity;
-        productSales[item.productId].revenue += item.amount;
+        productSales[item.productId].revenue += item.discountedAmount || item.amount;
       });
     });
 
@@ -330,19 +347,24 @@ export const AnalyticsService = {
   /**
    * Generate sales by category report
    */
-  generateSalesByCategoryReport: (bills: Bill[]): Array<{ category: string; quantity: number; revenue: number; count: number }> => {
+  generateSalesByCategoryReport: (bills: Bill[], products?: Product[]): Array<{ category: string; quantity: number; revenue: number; count: number }> => {
     const categorySales: Record<string, { quantity: number; revenue: number; count: number }> = {};
+
+    // Build a productId → category lookup from products array
+    const categoryMap: Record<number, string> = {};
+    if (products) {
+      products.forEach(p => { categoryMap[p.id] = p.category || 'General'; });
+    }
 
     bills.forEach(bill => {
       bill.items.forEach(item => {
-        // Extract category from product (you might need to fetch product details)
-        const category = 'General'; // Placeholder
+        const category = categoryMap[item.productId] || 'General';
 
         if (!categorySales[category]) {
           categorySales[category] = { quantity: 0, revenue: 0, count: 0 };
         }
         categorySales[category].quantity += item.quantity;
-        categorySales[category].revenue += item.amount;
+        categorySales[category].revenue += item.discountedAmount || item.amount;
         categorySales[category].count += 1;
       });
     });
@@ -389,13 +411,32 @@ export const AnalyticsService = {
   /**
    * Export report to JSON
    */
-  exportReportToJSON: (reportName: string, data: any) => {
-    const jsonString = JSON.stringify(data, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${reportName}_${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
+  exportReportToJSON: async (reportName: string, data: any) => {
+    try {
+      const jsonString = JSON.stringify(data, null, 2);
+      const bytes = new TextEncoder().encode(jsonString);
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const { writeFile } = await import('@tauri-apps/plugin-fs');
+
+      const filePath = await save({
+        defaultPath: `${reportName}_${new Date().toISOString().split('T')[0]}.json`,
+        filters: [{ name: 'JSON Files', extensions: ['json'] }],
+      });
+
+      if (filePath) {
+        await writeFile(filePath, bytes);
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+      // Fallback to browser download
+      const jsonString = JSON.stringify(data, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${reportName}_${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+    }
   },
 };

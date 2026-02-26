@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
+import { useToast } from '../components/Toast';
 import { Customer, Bill } from '../types';
 import { StorageService } from '../services/storage';
-import { COLORS } from '../constants';
-import { Search, Plus, Phone, MapPin, History, Download, X, Merge, Filter } from 'lucide-react';
+import { Search, Plus, Phone, MapPin, History, Download, X, Merge } from 'lucide-react';
 import { searchMatch } from '../utils';
+import { CardGridSkeleton } from '../components/Skeleton';
+import EmptyState from '../components/EmptyState';
 
 const Customers: React.FC = () => {
     const [customers, setCustomers] = useState<Customer[]>([]);
@@ -22,6 +24,8 @@ const Customers: React.FC = () => {
     const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
     const [mergeFrom, setMergeFrom] = useState<string>('');
     const [mergeTo, setMergeTo] = useState<string>('');
+    const [loading, setLoading] = useState(true);
+    const toast = useToast();
 
     useEffect(() => {
         loadCustomers();
@@ -30,6 +34,7 @@ const Customers: React.FC = () => {
     const loadCustomers = async () => {
         const data = await StorageService.getCustomers();
         setCustomers(data);
+        setLoading(false);
     };
 
     // Filter History when dates change or modal opens
@@ -88,18 +93,23 @@ const Customers: React.FC = () => {
     const handleMerge = async (e: React.FormEvent) => {
         e.preventDefault();
         if (mergeFrom === mergeTo) {
-            alert("Cannot merge a customer into themselves.");
+            toast.warning('Invalid Merge', 'Cannot merge a customer into themselves.');
             return;
         }
         if (!mergeFrom || !mergeTo) {
-            alert("Please select both customers.");
+            toast.warning('Missing Selection', 'Please select both customers.');
             return;
         }
 
-        const confirm = window.confirm("Are you sure? This will move all bills from the source customer to the target customer and DELETE the source customer profile. This cannot be undone.");
-        if (confirm) {
+        const confirmed = await toast.confirm({
+            title: 'Merge Customers',
+            message: 'This will move all bills from the source customer to the target customer and DELETE the source customer profile. This cannot be undone.',
+            confirmText: 'Merge',
+            danger: true
+        });
+        if (confirmed) {
             await StorageService.mergeCustomers(Number(mergeFrom), Number(mergeTo));
-            alert("Customers merged successfully.");
+            toast.success('Merge Complete', 'Customers merged successfully.');
             await loadCustomers();
             setIsMergeModalOpen(false);
             setMergeFrom('');
@@ -107,24 +117,26 @@ const Customers: React.FC = () => {
         }
     };
 
-    const handleExport = () => {
-        if (customers.length === 0) return alert("No customers to export");
+    const handleExport = async () => {
+        if (customers.length === 0) { toast.warning('Nothing to Export', 'No customers to export'); return; }
         const headers = ["Name", "Phone", "Email", "Address", "GSTIN"];
+        const csvEscape = (val: string) => {
+            if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+                return `"${val.replace(/"/g, '""')}"`;
+            }
+            return val;
+        };
         const rows = customers.map(c => [
-            `"${c.name}"`,
-            `"${c.phone}"`,
-            c.email || "",
-            `"${(c.address || "").replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-            c.gstin || ""
+            csvEscape(c.name),
+            csvEscape(c.phone),
+            csvEscape(c.email || ''),
+            csvEscape((c.address || '').replace(/\n/g, ' ')),
+            csvEscape(c.gstin || '')
         ].join(","));
         
-        const csv = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-        const link = document.createElement("a");
-        link.href = encodeURI(csv);
-        link.download = `customers_export_${new Date().toISOString().slice(0,10)}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const csv = [headers.join(","), ...rows].join("\n");
+        const { saveCsvFile } = await import('../utils');
+        await saveCsvFile(`customers_export_${new Date().toISOString().slice(0,10)}.csv`, csv);
     };
 
     const openModal = (customer?: Customer) => {
@@ -178,8 +190,13 @@ const Customers: React.FC = () => {
                 </div>
             </div>
 
+            {loading ? <CardGridSkeleton count={6} /> : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filtered.map(c => (
+                {filtered.length === 0 ? (
+                    <div className="col-span-full">
+                        <EmptyState type="customers" title="No customers found" description={search ? 'Try a different search term' : 'Add your first customer to get started'} action={!search ? { label: 'Add Customer', onClick: () => openModal() } : undefined} />
+                    </div>
+                ) : filtered.map(c => (
                     <div key={c.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 hover:shadow-md transition-shadow relative group">
                         <div className="flex justify-between items-start mb-2">
                             <h3 className="font-bold text-lg text-gray-800">{c.name}</h3>
@@ -198,11 +215,12 @@ const Customers: React.FC = () => {
                     </div>
                 ))}
             </div>
+            )}
 
             {/* Edit/Add Modal */}
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+                    <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md animate-slideUp">
                         <h2 className="text-xl font-bold mb-4">{current.id ? 'Edit Customer' : 'New Customer'}</h2>
                         <form onSubmit={handleSave} className="space-y-4">
                             {error && (
@@ -233,8 +251,8 @@ const Customers: React.FC = () => {
 
             {/* Merge Modal */}
             {isMergeModalOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+                    <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md animate-slideUp">
                         <div className="flex justify-between items-center mb-4 border-b pb-2">
                             <h2 className="text-xl font-bold text-gray-800 flex items-center"><Merge className="mr-2"/> Merge Customers</h2>
                             <button onClick={() => setIsMergeModalOpen(false)}><X className="text-gray-400"/></button>
@@ -286,8 +304,8 @@ const Customers: React.FC = () => {
 
             {/* History Modal */}
             {viewHistory && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl h-[85vh] flex flex-col">
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+                    <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl h-[85vh] flex flex-col animate-slideUp">
                         <div className="p-4 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50 rounded-t-xl gap-4">
                             <div>
                                 <h3 className="text-xl font-bold text-gray-800">{viewHistory.name}</h3>
@@ -332,7 +350,7 @@ const Customers: React.FC = () => {
                                             <td className="p-3">{new Date(bill.date).toLocaleDateString()}</td>
                                             <td className="p-3 font-mono">{bill.invoiceNumber}</td>
                                             <td className="p-3 text-gray-500">
-                                                {bill.items.length} items ({bill.items.map(i => i.productName).join(', ').slice(0,30)}...)
+                                                {(() => { const items = bill.items.map(i => i.productName).join(', '); return `${bill.items.length} items (${items.length > 30 ? items.slice(0,30) + '...' : items})`; })()}
                                             </td>
                                             <td className="p-3 text-right font-bold">₹{bill.grandTotal.toFixed(2)}</td>
                                         </tr>

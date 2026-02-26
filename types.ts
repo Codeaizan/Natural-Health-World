@@ -13,6 +13,7 @@ export interface CompanySettings {
   
   // GST Config
   gstin: string;
+  panNumber?: string;
   stateName?: string;
   stateCode?: string;
 
@@ -177,7 +178,7 @@ export interface GSTR2Data {
 export interface TaxAdjustment {
   id: string;
   date: string;
-  type: 'tds' | 'tcs' | 'advance_tax' | 'deferred';
+  type: 'tds' | 'tcs' | 'excise' | 'advance_tax' | 'deferred';
   amount: number;
   description: string;
   referenceNumber?: string;

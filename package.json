@@ -3,7 +3,7 @@
   "description": "Bill Management System for Natural Health Businesses",
   "author": "Natural Health World",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,6 +15,8 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-sql": "^2.3.2",
     "dexie": "^4.3.0",
     "html2pdf.js": "^0.10.1",

@@ -8,7 +8,7 @@ import {
 import { COLORS } from '../constants';
 import { 
     Trophy, TrendingUp, Calculator, Download, Printer, 
-    PieChart as PieChartIcon, Users, FileText, ShoppingBag, BadgeIndianRupee 
+    Users, FileText, ShoppingBag, BadgeIndianRupee 
 } from 'lucide-react';
 
 const Reports: React.FC = () => {
@@ -104,13 +104,14 @@ const Reports: React.FC = () => {
                 const category = product?.category || 'General';
 
                 const current = prodMap.get(item.productId) || { name: item.productName, qty: 0, rev: 0, cat: category };
+                const itemRevenue = item.discountedAmount || item.amount;
                 prodMap.set(item.productId, {
                     ...current,
                     qty: current.qty + item.quantity,
-                    rev: current.rev + item.amount
+                    rev: current.rev + itemRevenue
                 });
 
-                catMap.set(category, (catMap.get(category) || 0) + item.amount);
+                catMap.set(category, (catMap.get(category) || 0) + itemRevenue);
             });
         });
 
@@ -152,9 +153,11 @@ const Reports: React.FC = () => {
                 const hsn = item.hsnCode || 'N/A';
                 const cur = hsnMap.get(hsn) || { qty: 0, taxable: 0, tax: 0 };
                 
-                // Item amount is taxable value in GST bill logic
-                const itemTaxable = item.amount; 
-                const itemTax = itemTaxable * 0.05; 
+                // Item taxable value (use discounted amount if available)
+                const itemTaxable = item.discountedAmount || item.amount; 
+                // Proportionally compute per-item tax from bill-level tax totals
+                const billTaxRate = b.taxableAmount > 0 ? (b.cgstAmount + b.sgstAmount + (b.igstAmount || 0)) / b.taxableAmount : 0;
+                const itemTax = itemTaxable * billTaxRate;
 
                 hsnMap.set(hsn, {
                     qty: cur.qty + item.quantity,
@@ -223,7 +226,16 @@ const Reports: React.FC = () => {
     }, [filteredBills, allBills, startDate]);
 
     // --- Export Functionality ---
-    const handleExport = () => {
+    const csvEscape = (val: string | number): string => {
+        if (typeof val === 'number') return val.toFixed(2);
+        const s = String(val);
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+            return `"${s.replace(/"/g, '""')}"`;
+        }
+        return s;
+    };
+
+    const handleExport = async () => {
         let headers: string[] = [];
         let rows: (string | number)[][] = [];
         let filename = `report_${activeTab}_${startDate}_${endDate}.csv`;
@@ -251,18 +263,13 @@ const Reports: React.FC = () => {
                 break;
             case 'stock':
                 headers = ["Date", "Product", "Change", "Reason", "Notes"];
-                rows = stockHistory.map(s => [s.timestamp, s.productName, s.changeAmount, s.reason, s.referenceId || '']);
+                rows = filteredStockHistory.map(s => [s.timestamp, s.productName, s.changeAmount, s.reason, s.referenceId || '']);
                 break;
         }
 
-        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.href = encodedUri;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        const csvContent = [headers.join(","), ...rows.map(r => r.map(csvEscape).join(","))].join("\n");
+        const { saveCsvFile } = await import('../utils');
+        await saveCsvFile(filename, csvContent);
     };
 
     const handlePrint = () => {
@@ -270,18 +277,31 @@ const Reports: React.FC = () => {
     };
 
     // --- Components ---
-    const KpiCard = ({ title, value, subtext, icon: Icon, color }: any) => (
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
-            <div className={`p-3 rounded-lg mr-4 ${color} bg-opacity-10`}>
-                <Icon size={24} className={color.replace('bg-', 'text-')} />
+    const kpiColorMap: Record<string, { iconBg: string; iconText: string }> = {
+        'green': { iconBg: 'bg-green-100', iconText: 'text-green-600' },
+        'blue': { iconBg: 'bg-blue-100', iconText: 'text-blue-600' },
+        'purple': { iconBg: 'bg-purple-100', iconText: 'text-purple-600' },
+        'amber': { iconBg: 'bg-amber-100', iconText: 'text-amber-600' },
+        'gray': { iconBg: 'bg-gray-100', iconText: 'text-gray-600' },
+    };
+
+    const KpiCard = ({ title, value, subtext, icon: Icon, color }: any) => {
+        // Extract base color name (e.g. "green" from "text-green-600 bg-green-600")
+        const colorName = Object.keys(kpiColorMap).find(c => color.includes(c)) || 'gray';
+        const { iconBg, iconText } = kpiColorMap[colorName];
+        return (
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
+                <div className={`p-3 rounded-lg mr-4 ${iconBg}`}>
+                    <Icon size={24} className={iconText} />
+                </div>
+                <div>
+                    <p className="text-sm text-gray-500 font-medium">{title}</p>
+                    <h3 className="text-xl font-bold text-gray-800">{value}</h3>
+                    {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>}
+                </div>
             </div>
-            <div>
-                <p className="text-sm text-gray-500 font-medium">{title}</p>
-                <h3 className="text-xl font-bold text-gray-800">{value}</h3>
-                {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>}
-            </div>
-        </div>
-    );
+        );
+    };
 
     const COLORS_CHART = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
@@ -362,7 +382,7 @@ const Reports: React.FC = () => {
                             <div className="bg-white p-6 rounded-xl shadow-sm border">
                                 <h3 className="font-bold text-gray-700 mb-4">Category Distribution (Revenue)</h3>
                                 <div className="h-64">
-                                    <ResponsiveContainer width="100%" height="100%">
+                                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                                         <PieChart>
                                             <Pie 
                                                 data={productMetrics.categoryData} 

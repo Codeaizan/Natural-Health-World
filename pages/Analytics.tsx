@@ -2,8 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { StorageService } from '../services/storage';
 import { AnalyticsService } from '../services/analytics';
 import {
-  Bill,
-  Product,
   ProfitLossStatement,
   CashFlowStatement,
   InventoryValuation,
@@ -14,20 +12,11 @@ import {
   TrendingUp,
   TrendingDown,
   BarChart3,
-  DollarSign,
-  Package,
-  Calendar,
   Download,
-  Filter,
 } from 'lucide-react';
 import {
-  LineChart,
-  Line,
   BarChart,
   Bar,
-  PieChart,
-  Pie,
-  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -59,8 +48,6 @@ const MetricCard: React.FC<MetricCardProps> = ({ metric }) => (
 );
 
 const Analytics: React.FC = () => {
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'pnl' | 'cashflow' | 'inventory' | 'yoy' | 'sales'>('overview');
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
@@ -80,17 +67,14 @@ const Analytics: React.FC = () => {
         const billsData = await StorageService.getBills();
         const productsData = await StorageService.getProducts();
 
-        setBills(billsData);
-        setProducts(productsData);
-
         // Generate all analytics data
         const dashboardMetrics = AnalyticsService.generateMetricsDashboard(billsData, productsData, selectedMonth, selectedYear);
         setMetrics(dashboardMetrics);
 
-        const pnl = AnalyticsService.generateProfitLossStatement(billsData, selectedMonth, selectedYear);
+        const pnl = AnalyticsService.generateProfitLossStatement(billsData, productsData, selectedMonth, selectedYear);
         setPnlData(pnl);
 
-        const cashFlow = AnalyticsService.generateCashFlowStatement(billsData, selectedMonth, selectedYear);
+        const cashFlow = AnalyticsService.generateCashFlowStatement(billsData, productsData, selectedMonth, selectedYear);
         setCashFlowData(cashFlow);
 
         const inventory = AnalyticsService.calculateInventoryValuation(productsData, billsData, inventoryMethod);
@@ -111,6 +95,21 @@ const Analytics: React.FC = () => {
     loadData();
   }, [selectedMonth, selectedYear, inventoryMethod]);
 
+  const handleExport = async () => {
+    const data: any = {};
+    if (pnlData) data.profitAndLoss = pnlData;
+    if (cashFlowData) data.cashFlow = cashFlowData;
+    if (inventoryData.length > 0) data.inventoryValuation = inventoryData;
+    if (yoyData.length > 0) data.yearOverYear = yoyData;
+    if (salesByProduct.length > 0) data.salesByProduct = salesByProduct;
+    data.period = { month: selectedMonth, year: selectedYear };
+
+    await AnalyticsService.exportReportToJSON(
+      `analytics_${selectedYear}_${String(selectedMonth).padStart(2, '0')}`,
+      data
+    );
+  };
+
   if (loading) {
     return (
       <div className="p-6 bg-gray-50 min-h-screen flex items-center justify-center">
@@ -120,7 +119,6 @@ const Analytics: React.FC = () => {
   }
 
   const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const currentMonth = new Date().getMonth() + 1;
   const currentYear = new Date().getFullYear();
 
   return (
@@ -179,7 +177,7 @@ const Analytics: React.FC = () => {
             </div>
           )}
 
-          <button className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-2 mt-6">
+          <button onClick={handleExport} className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium flex items-center gap-2 mt-6">
             <Download size={18} />
             Export
           </button>
@@ -423,7 +421,7 @@ const Analytics: React.FC = () => {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Top Selling Products</h3>
 
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={300} minWidth={0} minHeight={0}>
                     <BarChart data={salesByProduct.slice(0, 10)}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="productName" tick={{ fontSize: 12 }} angle={-45} textAnchor="end" height={80} />

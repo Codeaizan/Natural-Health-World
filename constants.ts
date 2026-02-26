@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   instagram: '@naturalhealthworld',
   
   gstin: '19ABCDE1234F1Z5',
+  panNumber: '',
   stateName: 'West Bengal',
   stateCode: '19',
 

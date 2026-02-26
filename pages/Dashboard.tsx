@@ -2,28 +2,46 @@ import React, { useEffect, useState } from 'react';
 import { StorageService } from '../services/storage';
 import { Bill, Product } from '../types';
 import { COLORS } from '../constants';
-import { DollarSign, ShoppingBag, AlertTriangle, TrendingUp, Clock } from 'lucide-react';
+import { useTheme } from '../services/theme';
+import { DollarSign, ShoppingBag, AlertTriangle, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { DashboardSkeleton } from '../components/Skeleton';
 
 const Dashboard: React.FC = () => {
+  useTheme();
   const [bills, setBills] = useState<Bill[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
   
   useEffect(() => {
     const loadData = async () => {
-      const billsData = await StorageService.getBills();
-      const productsData = await StorageService.getProducts();
-      setBills(billsData);
-      setProducts(productsData);
+      try {
+        const billsData = await StorageService.getBills();
+        const productsData = await StorageService.getProducts();
+        setBills(billsData);
+        setProducts(productsData);
+      } catch (err) {
+        console.error('Error loading dashboard data:', err);
+      } finally {
+        setLoading(false);
+      }
     };
     loadData();
   }, []);
 
+  if (loading) return <DashboardSkeleton />;
+
   // Metrics
-  const totalSales = bills.reduce((sum, b) => sum + b.grandTotal, 0);
-  const totalBills = bills.length;
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const monthlyBills = bills.filter(b => {
+      const d = new Date(b.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+  const totalSales = monthlyBills.reduce((sum, b) => sum + b.grandTotal, 0);
+  const totalBills = monthlyBills.length;
   const lowStockCount = products.filter(p => p.currentStock <= p.minStockLevel).length;
-  const avgBillValue = totalBills > 0 ? totalSales / totalBills : 0;
 
   // Expiry Logic
   const expiringProducts = products.filter(p => {
@@ -90,13 +108,13 @@ const Dashboard: React.FC = () => {
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
-          title="Total Revenue" 
+          title="Revenue (This Month)" 
           value={`₹${totalSales.toLocaleString()}`} 
           icon={DollarSign} 
           color="text-emerald-600 bg-emerald-600" 
         />
         <StatCard 
-          title="Total Bills" 
+          title="Bills (This Month)" 
           value={totalBills} 
           icon={ShoppingBag} 
           color="text-blue-600 bg-blue-600" 
@@ -118,8 +136,8 @@ const Dashboard: React.FC = () => {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 h-96">
-          <h3 className="text-lg font-bold mb-4" style={{ color: COLORS.darkText }}>Sales Trend (Last 7 Days)</h3>
-          <ResponsiveContainer width="100%" height="85%">
+          <h3 className="text-lg font-bold mb-4 text-gray-800">Sales Trend (Last 7 Days)</h3>
+          <ResponsiveContainer width="100%" height="85%" minWidth={0} minHeight={0}>
             <BarChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="name" axisLine={false} tickLine={false} />
@@ -132,7 +150,7 @@ const Dashboard: React.FC = () => {
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col h-80">
            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold" style={{ color: COLORS.darkText }}>Inventory Alerts</h3>
+              <h3 className="text-lg font-bold text-gray-800">Inventory Alerts</h3>
               <div className="space-x-2">
                  <span className="text-xs font-semibold px-2 py-1 bg-amber-100 text-amber-800 rounded-full">
                     Low Stock: {lowStockCount}

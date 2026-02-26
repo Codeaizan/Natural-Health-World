@@ -10,14 +10,13 @@ const notifyChange = (type?: string) => {
   });
 };
 
-// Simple Hash for "bcrypt-like" behavior (Browser compatible)
+// SHA-256 hash for password storage (Browser compatible, no salt)
 const hashPassword = async (password: string): Promise<string> => {
     try {
         const msgBuffer = new TextEncoder().encode(password);
         const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log('Hash computed for password:', { password, hash });
         return hash;
     } catch (err) {
         console.error('Hashing error:', err);
@@ -44,7 +43,6 @@ export const StorageService = {
   getUsers: async (): Promise<User[]> => {
       try {
           const users = await db.users.toArray();
-          console.log('Retrieved users from DB:', users);
           if (users.length === 0) {
               // Default Admin (Password: admin123) - SHA256 hash
               const defaultAdmin: User = {
@@ -54,12 +52,9 @@ export const StorageService = {
               };
               try {
                   await db.users.add(defaultAdmin);
-                  console.log('Default admin user added successfully');
               } catch (e) {
                   // User might already exist, try put instead
-                  console.log('Add failed, trying put:', e);
                   await db.users.put(defaultAdmin);
-                  console.log('Default admin user saved via put');
               }
               return [defaultAdmin];
           }
@@ -77,14 +72,23 @@ export const StorageService = {
 
   verifyCredentials: async (u: string, p: string): Promise<User | null> => {
       try {
+          // Ensure default admin exists on first-ever login
+          const count = await db.users.count();
+          if (count === 0) {
+              const defaultAdmin: User = {
+                  username: 'admin',
+                  passwordHash: await hashPassword('admin123'),
+                  role: 'admin'
+              };
+              await db.users.put(defaultAdmin);
+          }
+
           const user = await db.users.get(u);
           if (!user) {
-              console.log('User not found:', u);
               return null;
           }
           
           const hash = await hashPassword(p);
-          console.log('Password verification:', { username: u, passwordHash: user.passwordHash, computedHash: hash, match: user.passwordHash === hash });
           
           if (user.passwordHash === hash) {
               // Update last login
@@ -445,7 +449,14 @@ export const StorageService = {
     await db.stockHistory.clear();
     await db.backups.clear();
     await db.users.clear();
-    localStorage.clear();
+    // Only remove app-specific localStorage keys, preserve audit logs and theme
+    const keysToPreserve = ['nhw_audit_logs', 'nhw_tax_audit_logs', 'nhw_theme'];
+    const allKeys = Object.keys(localStorage);
+    allKeys.forEach(key => {
+      if (!keysToPreserve.includes(key)) {
+        localStorage.removeItem(key);
+      }
+    });
     notifyChange('clear');
   }
 };

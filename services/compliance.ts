@@ -10,6 +10,9 @@ const TAX_DB_KEYS = {
   TAX_RECONCILIATION: 'nhw_tax_reconciliation',
 };
 
+const MAX_TAX_AUDIT_AGE_DAYS = 365; // Keep tax audit logs for 1 year
+const MAX_TAX_AUDIT_ENTRIES = 5000;
+
 const load = <T>(key: string, defaultValue: T): T => {
   const data = localStorage.getItem(key);
   if (!data) return defaultValue;
@@ -21,7 +24,27 @@ const load = <T>(key: string, defaultValue: T): T => {
 };
 
 const save = <T>(key: string, data: T): void => {
-  localStorage.setItem(key, JSON.stringify(data));
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (quotaErr) {
+    // QuotaExceededError — prune tax audit logs if that's what's filling up
+    console.warn('localStorage quota exceeded, pruning tax audit logs...');
+    try {
+      const cutoff = Date.now() - MAX_TAX_AUDIT_AGE_DAYS * 24 * 60 * 60 * 1000;
+      const logsRaw = localStorage.getItem(TAX_DB_KEYS.TAX_AUDIT_LOGS);
+      if (logsRaw) {
+        const logs: TaxAuditLog[] = JSON.parse(logsRaw);
+        const pruned = logs
+          .filter(l => new Date(l.timestamp).getTime() >= cutoff)
+          .slice(-MAX_TAX_AUDIT_ENTRIES);
+        localStorage.setItem(TAX_DB_KEYS.TAX_AUDIT_LOGS, JSON.stringify(pruned));
+      }
+      // Retry the original save
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch {
+      console.error('Failed to save to localStorage even after pruning');
+    }
+  }
 };
 
 export const TaxComplianceService = {
@@ -36,8 +59,14 @@ export const TaxComplianceService = {
     bills.forEach(bill => {
       const billDate = new Date(bill.date);
       if (billDate.getMonth() + 1 === month && billDate.getFullYear() === year) {
+        // Compute bill-level effective tax rate (avoid division by zero)
+        const billTaxTotal = bill.isGstBill ? (bill.cgstAmount + bill.sgstAmount + bill.igstAmount) : 0;
+        const effectiveTaxRate = bill.subTotal > 0 ? billTaxTotal / bill.subTotal : 0;
+
         bill.items.forEach(item => {
-          const taxAmount = item.quantity * item.rate * (bill.isGstBill ? (bill.cgstAmount + bill.sgstAmount + bill.igstAmount) / bill.subTotal : 0);
+          const itemTaxable = item.discountedAmount || item.amount;
+          const taxAmount = itemTaxable * effectiveTaxRate;
+          const taxRatePercent = itemTaxable > 0 ? (taxAmount / itemTaxable) * 100 : 0;
           const gstItem: GSTItem = {
             invoiceNumber: bill.invoiceNumber,
             date: bill.date,
@@ -45,8 +74,8 @@ export const TaxComplianceService = {
             customerGstin: bill.customerGstin,
             hsnCode: item.hsnCode || '',
             quantity: item.quantity,
-            taxableValue: item.amount,
-            taxRate: item.quantity * item.rate > 0 ? (taxAmount / (item.quantity * item.rate)) * 100 : 0,
+            taxableValue: itemTaxable,
+            taxRate: Math.round(taxRatePercent * 100) / 100,
             taxAmount: taxAmount || 0,
             itemDescription: item.productName,
           };
@@ -87,8 +116,13 @@ export const TaxComplianceService = {
     bills.forEach(bill => {
       const billDate = new Date(bill.date);
       if (billDate.getMonth() + 1 === month && billDate.getFullYear() === year) {
+        const billTaxTotal = bill.isGstBill ? (bill.cgstAmount + bill.sgstAmount + bill.igstAmount) : 0;
+        const effectiveTaxRate = bill.subTotal > 0 ? billTaxTotal / bill.subTotal : 0;
+
         bill.items.forEach(item => {
-          const taxAmount = item.quantity * item.rate * (bill.isGstBill ? (bill.cgstAmount + bill.sgstAmount + bill.igstAmount) / bill.subTotal : 0);
+          const itemTaxable = item.discountedAmount || item.amount;
+          const taxAmount = itemTaxable * effectiveTaxRate;
+          const taxRatePercent = itemTaxable > 0 ? (taxAmount / itemTaxable) * 100 : 0;
           const purchaseItem: GSTItem = {
             invoiceNumber: bill.invoiceNumber,
             date: bill.date,
@@ -96,9 +130,9 @@ export const TaxComplianceService = {
             customerGstin: bill.customerGstin,
             hsnCode: item.hsnCode || '',
             quantity: item.quantity,
-            taxableValue: item.amount,
-            taxRate: item.quantity * item.rate > 0 ? (taxAmount / (item.quantity * item.rate)) * 100 : 0,
-            taxAmount,
+            taxableValue: itemTaxable,
+            taxRate: Math.round(taxRatePercent * 100) / 100,
+            taxAmount: taxAmount || 0,
             itemDescription: item.productName,
           };
           purchaseItems.push(purchaseItem);
@@ -311,10 +345,10 @@ export const TaxComplianceService = {
 
     const totalGstCollected = cgstCollected + sgstCollected + igstCollected;
 
-    // Liabilities (typically 50% of collected for demo)
-    const cgstLiability = cgstCollected * 0.5;
-    const sgstLiability = sgstCollected * 0.5;
-    const igstLiability = igstCollected * 0.5;
+    // Liabilities equal collected amounts (before ITC deductions which are not tracked)
+    const cgstLiability = cgstCollected;
+    const sgstLiability = sgstCollected;
+    const igstLiability = igstCollected;
     const totalGstLiability = cgstLiability + sgstLiability + igstLiability;
 
     // Get TDS adjustments for the month

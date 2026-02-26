@@ -181,6 +181,17 @@ export const StorageService = {
   verifyCredentials: async (u: string, p: string): Promise<User | null> => {
     try {
       const db = await getDb();
+
+      // Ensure default admin exists on first-ever login
+      const countResult: any[] = await db.select("SELECT COUNT(*) as cnt FROM users");
+      if (countResult[0]?.cnt === 0) {
+        const defaultHash = await hashPassword('admin123');
+        await db.execute(
+          "INSERT OR IGNORE INTO users (username, password_hash, role) VALUES ($1, $2, $3)",
+          ['admin', defaultHash, 'admin']
+        );
+      }
+
       const rows: any[] = await db.select("SELECT * FROM users WHERE username = $1", [u]);
       if (rows.length === 0) return null;
 

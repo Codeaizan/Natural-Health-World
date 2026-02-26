@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StorageService } from '../services/storage';
 import { ForecastingService, ProductForecast, ForecastData } from '../services/forecasting';
-import { Bill, Product } from '../types';
+import { Bill } from '../types';
 import { TrendingUp, TrendingDown, AlertCircle, BarChart3, Calendar } from 'lucide-react';
 import {
   LineChart,
@@ -12,13 +12,11 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
 
 const Forecasting: React.FC = () => {
   const [bills, setBills] = useState<Bill[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
   const [forecastedProducts, setForecastedProducts] = useState<ProductForecast[]>([]);
   const [generalForecast, setGeneralForecast] = useState<ForecastData[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<ProductForecast | null>(null);
@@ -33,7 +31,6 @@ const Forecasting: React.FC = () => {
         const productsData = await StorageService.getProducts();
 
         setBills(billsData);
-        setProducts(productsData);
 
         // Generate forecasts
         const productForecasts = ForecastingService.forecastProductDemand(
@@ -143,7 +140,9 @@ const Forecasting: React.FC = () => {
           <StatCard
             label="Avg Daily Revenue"
             value={`₹${(
-              generalForecast.reduce((sum, d) => sum + d.predicted, 0) / generalForecast.length
+              generalForecast.length > 0
+                ? generalForecast.reduce((sum, d) => sum + d.predicted, 0) / generalForecast.length
+                : 0
             ).toFixed(0)}`}
           />
           <StatCard
@@ -164,7 +163,7 @@ const Forecasting: React.FC = () => {
             <BarChart3 size={20} className="text-blue-600" />
             <h2 className="text-lg font-semibold text-gray-900">Overall Sales Forecast</h2>
           </div>
-          <ResponsiveContainer width="100%" height={300}>
+          <ResponsiveContainer width="100%" height={300} minWidth={0} minHeight={0}>
             <LineChart data={generalChartData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" tick={{ fontSize: 12 }} />
@@ -234,7 +233,7 @@ const Forecasting: React.FC = () => {
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
                   {selectedProduct.productName} - Demand Forecast
                 </h3>
-                <ResponsiveContainer width="100%" height={300}>
+                <ResponsiveContainer width="100%" height={300} minWidth={0} minHeight={0}>
                   <BarChart data={productChartData}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" tick={{ fontSize: 12 }} />

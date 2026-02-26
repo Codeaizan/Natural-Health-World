@@ -1,1 +1,356 @@
 @import "tailwindcss";
+
+/* Enable class-based dark mode for TailwindCSS v4 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ===================================================================
+   ANIMATIONS
+   =================================================================== */
+
+/* Shimmer for skeleton loading */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Dark mode shimmer */
+html.dark .animate-shimmer {
+  background-image: linear-gradient(to right, #374151, #4b5563, #374151) !important;
+}
+
+/* Fade in */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Slide up (for modals) */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-slideUp {
+  animation: slideUp 0.25s ease-out forwards;
+}
+
+/* Overlay fade */
+@keyframes overlayFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-overlayFade {
+  animation: overlayFade 0.2s ease-out forwards;
+}
+
+/* Page transition */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-pageEnter {
+  animation: pageEnter 0.25s ease-out forwards;
+}
+
+/* Scale in (for cards appearing) */
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-scaleIn {
+  animation: scaleIn 0.2s ease-out forwards;
+}
+
+/* Dark mode body background transition */
+html {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+html.dark {
+  background-color: #111827;
+  color-scheme: dark;
+}
+
+/* ===================================================================
+   GLOBAL DARK MODE OVERRIDES
+   Automatically re-maps Tailwind's light-mode utilities to dark
+   equivalents when .dark is on <html>. This avoids adding dark:
+   to thousands of individual elements across all pages.
+   =================================================================== */
+
+/* --- Backgrounds --- */
+html.dark .bg-white { background-color: #1f2937 !important; }  /* gray-800 */
+html.dark .bg-gray-50 { background-color: #111827 !important; }  /* gray-900 */
+html.dark .bg-gray-100 { background-color: #1f2937 !important; }  /* gray-800 */
+html.dark .bg-gray-200 { background-color: #374151 !important; }  /* gray-700 */
+html.dark .bg-gray-300 { background-color: #4b5563 !important; }  /* gray-600 */
+
+/* --- Text Colors --- */
+html.dark .text-gray-900 { color: #f3f4f6 !important; }  /* gray-100 */
+html.dark .text-gray-800 { color: #e5e7eb !important; }  /* gray-200 */
+html.dark .text-gray-700 { color: #d1d5db !important; }  /* gray-300 */
+html.dark .text-gray-600 { color: #9ca3af !important; }  /* gray-400 */
+html.dark .text-gray-500 { color: #9ca3af !important; }  /* gray-400 */
+html.dark .text-gray-400 { color: #6b7280 !important; }  /* gray-500 */
+
+/* --- Border Colors --- */
+html.dark .border-gray-100 { border-color: #374151 !important; }  /* gray-700 */
+html.dark .border-gray-200 { border-color: #374151 !important; }  /* gray-700 */
+html.dark .border-gray-300 { border-color: #4b5563 !important; }  /* gray-600 */
+html.dark .border-gray-400 { border-color: #6b7280 !important; }  /* gray-500 */
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #374151 !important; }
+html.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #374151 !important; }
+
+/* --- Hover state backgrounds --- */
+html.dark .hover\:bg-gray-50:hover { background-color: #374151 !important; }
+html.dark .hover\:bg-gray-100:hover { background-color: #374151 !important; }
+html.dark .hover\:bg-gray-200:hover { background-color: #4b5563 !important; }
+
+/* --- Hover state borders --- */
+html.dark .hover\:border-gray-300:hover { border-color: #6b7280 !important; }
+html.dark .hover\:border-gray-400:hover { border-color: #9ca3af !important; }
+
+/* --- Focus ring --- */
+html.dark .focus\:ring-gray-500:focus { --tw-ring-color: #6b7280 !important; }
+
+/* --- Form Inputs --- */
+html.dark input, html.dark select, html.dark textarea {
+  background-color: #1f2937 !important;
+  color: #e5e7eb !important;
+  border-color: #4b5563 !important;
+}
+html.dark input::placeholder, html.dark textarea::placeholder {
+  color: #6b7280 !important;
+}
+html.dark input:focus, html.dark select:focus, html.dark textarea:focus {
+  border-color: #6b7280 !important;
+}
+
+/* --- Shadows (soften in dark) --- */
+html.dark .shadow-sm { box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3) !important; }
+html.dark .shadow-md { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3) !important; }
+html.dark .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4) !important; }
+html.dark .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4) !important; }
+
+/* --- Colored badge backgrounds (preserve readability) --- */
+html.dark .bg-emerald-100 { background-color: rgba(6, 78, 59, 0.4) !important; }
+html.dark .bg-blue-100 { background-color: rgba(30, 58, 138, 0.4) !important; }
+html.dark .bg-amber-100 { background-color: rgba(120, 53, 15, 0.4) !important; }
+html.dark .bg-red-100 { background-color: rgba(127, 29, 29, 0.4) !important; }
+html.dark .bg-green-100 { background-color: rgba(6, 78, 59, 0.4) !important; }
+html.dark .bg-yellow-100 { background-color: rgba(120, 53, 15, 0.4) !important; }
+html.dark .bg-purple-100 { background-color: rgba(76, 29, 149, 0.4) !important; }
+html.dark .bg-orange-100 { background-color: rgba(124, 45, 18, 0.4) !important; }
+html.dark .bg-cyan-100 { background-color: rgba(21, 94, 117, 0.4) !important; }
+html.dark .bg-indigo-100 { background-color: rgba(49, 46, 129, 0.4) !important; }
+html.dark .bg-red-50 { background-color: rgba(127, 29, 29, 0.25) !important; }
+html.dark .bg-green-50 { background-color: rgba(6, 78, 59, 0.25) !important; }
+html.dark .bg-blue-50 { background-color: rgba(30, 58, 138, 0.25) !important; }
+html.dark .bg-yellow-50 { background-color: rgba(120, 53, 15, 0.25) !important; }
+html.dark .bg-amber-50 { background-color: rgba(120, 53, 15, 0.25) !important; }
+html.dark .bg-orange-50 { background-color: rgba(124, 45, 18, 0.25) !important; }
+
+/* --- Colored badge text (brighten in dark) --- */
+html.dark .text-amber-800 { color: #fcd34d !important; }
+html.dark .text-red-800 { color: #fca5a5 !important; }
+html.dark .text-emerald-800 { color: #6ee7b7 !important; }
+html.dark .text-green-800 { color: #6ee7b7 !important; }
+html.dark .text-blue-800 { color: #93c5fd !important; }
+
+/* --- Table styling --- */
+html.dark thead.bg-gray-50 { background-color: #1e293b !important; }
+html.dark th { color: #9ca3af !important; }
+html.dark tr.border-b { border-color: #374151 !important; }
+html.dark tbody tr:hover { background-color: #374151 !important; }
+
+/* --- Modal overlay backdrop --- */
+html.dark .bg-black\/50 { background-color: rgba(0, 0, 0, 0.7) !important; }
+
+/* --- Recharts (charts) in dark mode --- */
+html.dark .recharts-cartesian-grid line { stroke: #374151 !important; }
+html.dark .recharts-text { fill: #9ca3af !important; }
+html.dark .recharts-default-tooltip {
+  background-color: #1f2937 !important;
+  border-color: #374151 !important;
+  color: #e5e7eb !important;
+}
+
+/* --- Inline COLORS styles — override via attribute selectors --- */
+html.dark [style*="color: rgb(59, 73, 83)"],
+html.dark [style*="color: #3B4953"] {
+  color: #e2e8f0 !important;
+}
+
+/* --- body bg in dark mode (overrides index.html inline style) --- */
+html.dark body {
+  background-color: #111827 !important;
+}
+
+/* --- Print: always light mode (never print dark) --- */
+@media print {
+  html.dark .bg-white { background-color: #ffffff !important; }
+  html.dark .text-gray-800 { color: #1f2937 !important; }
+  html.dark .text-gray-600 { color: #4b5563 !important; }
+  html.dark .border-gray-200 { border-color: #e5e7eb !important; }
+  html.dark input, html.dark select, html.dark textarea {
+    background-color: #ffffff !important;
+    color: #1f2937 !important;
+    border-color: #d1d5db !important;
+  }
+}
+
+/* --- Invoice preview: always light (for PDF generation) --- */
+#printable-area,
+#printable-area * {
+  background-color: inherit;
+  color: inherit;
+}
+html.dark #printable-area {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+}
+html.dark #printable-area * {
+  color: inherit !important;
+  border-color: #d1d5db !important;
+}
+html.dark #printable-area .bg-white { background-color: #ffffff !important; }
+html.dark #printable-area .bg-gray-50 { background-color: #f9fafb !important; }
+html.dark #printable-area .bg-gray-100 { background-color: #f3f4f6 !important; }
+html.dark #printable-area .bg-gray-800 { background-color: #1f2937 !important; }
+html.dark #printable-area .text-gray-400 { color: #9ca3af !important; }
+html.dark #printable-area .text-gray-500 { color: #6b7280 !important; }
+html.dark #printable-area .text-gray-600 { color: #4b5563 !important; }
+html.dark #printable-area .text-gray-700 { color: #374151 !important; }
+html.dark #printable-area .text-gray-800 { color: #1f2937 !important; }
+html.dark #printable-area .text-gray-900 { color: #111827 !important; }
+html.dark #printable-area .text-white { color: #ffffff !important; }
+html.dark #printable-area .border-gray-200 { border-color: #e5e7eb !important; }
+html.dark #printable-area .border-gray-300 { border-color: #d1d5db !important; }
+html.dark #printable-area input {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+  border-color: #d1d5db !important;
+}
+
+/* --- Settings invoice preview: always light --- */
+html.dark #invoice-preview {
+  background-color: #ffffff !important;
+  color: #1f2937 !important;
+  border-color: #e5e7eb !important;
+}
+html.dark #invoice-preview * {
+  color: inherit !important;
+  border-color: inherit !important;
+}
+html.dark #invoice-preview .bg-gray-100 { background-color: #f3f4f6 !important; }
+html.dark #invoice-preview .text-gray-900 { color: #111827 !important; }
+html.dark #invoice-preview .text-gray-700 { color: #374151 !important; }
+html.dark #invoice-preview .text-gray-600 { color: #4b5563 !important; }
+html.dark #invoice-preview .text-gray-500 { color: #6b7280 !important; }
+html.dark #invoice-preview .text-gray-400 { color: #9ca3af !important; }
+html.dark #invoice-preview .text-blue-600 { color: #2563eb !important; }
+
+/* ===================================================================
+   CONSISTENT BUTTON STYLES
+   =================================================================== */
+
+/* Form labels & inputs (used in modals) */
+.label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 0.25rem;
+}
+.input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input:focus {
+  border-color: #90AB8B;
+  box-shadow: 0 0 0 2px rgba(144, 171, 139, 0.3);
+}
+
+/* Primary button — green filled */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.5rem 1rem;
+  background-color: #5A7863;
+  color: #ffffff;
+  border-radius: 0.5rem;
+  font-size: 0.875rem; font-weight: 500;
+  border: none;
+  transition: background-color 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+.btn-primary:hover { background-color: #4a6553; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+.btn-primary:active { background-color: #3d5747; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Secondary button — gray outlined */
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.5rem 0.75rem;
+  background-color: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  font-size: 0.875rem; font-weight: 500;
+  color: #374151;
+  transition: background-color 0.15s;
+  cursor: pointer;
+}
+.btn-secondary:hover { background-color: #f3f4f6; }
+
+/* Danger button — red filled */
+.btn-danger {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.5rem 1rem;
+  background-color: #EF4444;
+  color: #ffffff;
+  border-radius: 0.5rem;
+  font-size: 0.875rem; font-weight: 500;
+  border: none;
+  transition: background-color 0.15s;
+  cursor: pointer;
+}
+.btn-danger:hover { background-color: #dc2626; }
+
+/* Ghost button — transparent */
+.btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+  transition: background-color 0.15s, color 0.15s;
+  cursor: pointer;
+}
+.btn-ghost:hover { background-color: #f3f4f6; color: #374151; }
+
+/* Dark mode overrides for buttons */
+html.dark .label { color: #d1d5db; }
+html.dark .input { background-color: #1f2937; color: #e5e7eb; border-color: #4b5563; }
+html.dark .input:focus { border-color: #6b7280; box-shadow: 0 0 0 2px rgba(107, 114, 128, 0.3); }
+
+html.dark .btn-primary { background-color: #166534; }
+html.dark .btn-primary:hover { background-color: #15803d; }
+
+html.dark .btn-secondary { background-color: #374151; border-color: #4b5563; color: #d1d5db; }
+html.dark .btn-secondary:hover { background-color: #4b5563; }
+
+html.dark .btn-danger { background-color: #b91c1c; }
+html.dark .btn-danger:hover { background-color: #dc2626; }
+
+html.dark .btn-ghost { color: #9ca3af; }
+html.dark .btn-ghost:hover { background-color: #374151; color: #e5e7eb; }
