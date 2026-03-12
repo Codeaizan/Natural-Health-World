@@ -1,313 +1,312 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { StorageService } from '../services/storage';
-import { Bill, StockHistory, Product, SalesPerson } from '../types';
+import React, { useEffect, useState, useMemo } from 'react';                  // React hooks for component state and effects
+import { StorageService } from '../services/storage';                          // Database access service
+import { Bill, StockHistory, Product, SalesPerson } from '../types';           // TypeScript type definitions
 import { 
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-    LineChart, Line, PieChart, Pie, Cell, Legend
-} from 'recharts';
-import { COLORS } from '../constants';
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, // Recharts bar chart components
+    LineChart, Line, PieChart, Pie, Cell, Legend                              // Recharts line, pie chart components
+} from 'recharts';                                                             // Data visualization library
+import { COLORS } from '../constants';                                         // App-wide color constants
 import { 
-    Trophy, TrendingUp, Calculator, Download, Printer, 
-    Users, FileText, ShoppingBag, BadgeIndianRupee 
-} from 'lucide-react';
+    Trophy, TrendingUp, Calculator, Download, Printer,                        // Icons for KPI cards and buttons
+    Users, FileText, ShoppingBag, BadgeIndianRupee                             // More icons
+} from 'lucide-react';                                                         // Icon library
 
 const Reports: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<'sales' | 'products' | 'gst' | 'staff' | 'customers' | 'stock'>('sales');
+    const [activeTab, setActiveTab] = useState<'sales' | 'products' | 'gst' | 'staff' | 'customers' | 'stock'>('sales'); // Currently selected report tab
     
-    // Initialize dates with current month range (using local time, not UTC)
+    // Initialize date range to current month (Month Start to Today)
     const getDefaultDates = () => {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0');
-        const day = String(now.getDate()).padStart(2, '0');
-        const firstDay = `${year}-${month}-01`;
-        const endDay = `${year}-${month}-${day}`;
-        return { firstDay, endDay };
+        const now = new Date();                                               // Current date/time
+        const year = now.getFullYear();                                       // Current year
+        const month = String(now.getMonth() + 1).padStart(2, '0');           // Current month (01-12)
+        const day = String(now.getDate()).padStart(2, '0');                  // Current day (01-31)
+        const firstDay = `${year}-${month}-01`;                               // Month start date (YYYY-MM-01)
+        const endDay = `${year}-${month}-${day}`;                             // Today's date (YYYY-MM-DD)
+        return { firstDay, endDay };                                          // Return date range object
     };
     
-    const { firstDay, endDay } = getDefaultDates();
-    const [startDate, setStartDate] = useState(firstDay);
-    const [endDate, setEndDate] = useState(endDay);
-    const [selectedSalesPerson, setSelectedSalesPerson] = useState<string>('all');
+    const { firstDay, endDay } = getDefaultDates();                           // Get default dates for initialization
+    const [startDate, setStartDate] = useState(firstDay);                    // Report date range start
+    const [endDate, setEndDate] = useState(endDay);                          // Report date range end
+    const [selectedSalesPerson, setSelectedSalesPerson] = useState<string>('all'); // Filter for specific sales person
 
-    // Data State
-    const [allBills, setAllBills] = useState<Bill[]>([]);
-    const [products, setProducts] = useState<Product[]>([]);
-    const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
-    const [stockHistory, setStockHistory] = useState<StockHistory[]>([]);
+    // Data State — Store fetched data from database
+    const [allBills, setAllBills] = useState<Bill[]>([]);                    // All bills in system
+    const [products, setProducts] = useState<Product[]>([]);                  // All products in inventory
+    const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);     // All sales staff members
+    const [stockHistory, setStockHistory] = useState<StockHistory[]>([]);    // Stock movement history
 
     useEffect(() => {
         const loadAll = async () => {
-            const bills = await StorageService.getBills();
-            const products = await StorageService.getProducts();
-            const salesPersons = await StorageService.getSalesPersons();
-            const stockHistory = await StorageService.getStockHistory();
-            setAllBills(bills);
-            setProducts(products);
-            setSalesPersons(salesPersons);
-            setStockHistory(stockHistory);
+            const bills = await StorageService.getBills();                    // Fetch bills from database
+            const products = await StorageService.getProducts();              // Fetch products from database
+            const salesPersons = await StorageService.getSalesPersons();      // Fetch staff from database
+            const stockHistory = await StorageService.getStockHistory();      // Fetch stock history from database
+            setAllBills(bills);                                               // Update bills state
+            setProducts(products);                                            // Update products state
+            setSalesPersons(salesPersons);                                    // Update staff state
+            setStockHistory(stockHistory);                                    // Update stock history state
         };
 
-        loadAll();
+        loadAll();                                                             // Load all data on component mount
 
-        // Subscribe to storage changes so reports refresh when data mutates elsewhere
-        const onChange = () => loadAll();
-        if ((StorageService as any).addChangeListener) {
-            (StorageService as any).addChangeListener(onChange);
+        // Subscribe to storage changes so reports auto-refresh when data changes elsewhere in the app
+        const onChange = () => loadAll();                                     // Define callback to reload on change
+        if ((StorageService as any).addChangeListener) {                      // Check if service supports listener
+            (StorageService as any).addChangeListener(onChange);              // Register change listener
         }
 
         return () => {
-            if ((StorageService as any).removeChangeListener) {
-                (StorageService as any).removeChangeListener(onChange);
+            if ((StorageService as any).removeChangeListener) {               // Check if service supports removal
+                (StorageService as any).removeChangeListener(onChange);       // Unregister listener on unmount
             }
         };
     }, []);
 
-    // --- Derived Data (Filtered) ---
+    // --- Derived Data (Filtered by Date Range) ---
     const filteredBills = useMemo(() => {
-        const start = new Date(startDate).getTime();
-        const end = new Date(endDate).setHours(23, 59, 59, 999);
+        const start = new Date(startDate).getTime();                           // Convert start date to timestamp
+        const end = new Date(endDate).setHours(23, 59, 59, 999);             // Convert end date to timestamp (end of day)
         return allBills.filter(b => {
-            const d = new Date(b.date).getTime();
-            return d >= start && d <= end;
+            const d = new Date(b.date).getTime();                             // Parse bill date to timestamp
+            return d >= start && d <= end;                                    // Keep bills within date range
         });
-    }, [allBills, startDate, endDate]);
+    }, [allBills, startDate, endDate]);                                       // Recalculate when bills or dates change
 
-    // --- 1. Sales Summary Metrics ---
+    // --- 1. Sales Summary Metrics — Total revenue, bill count, tax, daily trend ---
     const salesMetrics = useMemo(() => {
-        const totalSales = filteredBills.reduce((sum, b) => sum + b.grandTotal, 0);
-        const totalBills = filteredBills.length;
-        const avgBillValue = totalBills > 0 ? totalSales / totalBills : 0;
-        const totalTax = filteredBills.reduce((sum, b) => sum + (b.totalTax || 0), 0);
+        const totalSales = filteredBills.reduce((sum, b) => sum + b.grandTotal, 0); // Sum all bill amounts
+        const totalBills = filteredBills.length;                              // Count of bills
+        const avgBillValue = totalBills > 0 ? totalSales / totalBills : 0;   // Average revenue per bill
+        const totalTax = filteredBills.reduce((sum, b) => sum + (b.totalTax || 0), 0); // Sum all tax collected
         
-        // Daily Trend
-        const dailyMap = new Map<string, number>();
+        // Daily Trend — Group sales by date for trend chart
+        const dailyMap = new Map<string, number>();                          // Map to store date→sales
         filteredBills.forEach(b => {
-            const d = b.date.split('T')[0];
-            dailyMap.set(d, (dailyMap.get(d) || 0) + b.grandTotal);
+            const d = b.date.split('T')[0];                                  // Extract date part (YYYY-MM-DD)
+            dailyMap.set(d, (dailyMap.get(d) || 0) + b.grandTotal);          // Add to daily total
         });
-        const dailyData = Array.from(dailyMap.entries())
-            .map(([date, total]) => ({ date, total }))
-            .sort((a,b) => a.date.localeCompare(b.date));
+        const dailyData = Array.from(dailyMap.entries())                      // Convert map to array
+            .map(([date, total]) => ({ date, total }))                        // Map to objects with date/total
+            .sort((a,b) => a.date.localeCompare(b.date));                    // Sort chronologically
 
-        return { totalSales, totalBills, avgBillValue, totalTax, dailyData };
-    }, [filteredBills]);
+        return { totalSales, totalBills, avgBillValue, totalTax, dailyData }; // Return metrics object
+    }, [filteredBills]);                                                      // Recalculate when filtered bills change
 
-    // --- 2. Product Analysis ---
+    // --- 2. Product Analysis — Top products by qty/revenue, category breakdown ---
     const productMetrics = useMemo(() => {
-        const prodMap = new Map<number, { name: string, qty: number, rev: number, cat: string }>();
-        const catMap = new Map<string, number>();
+        const prodMap = new Map<number, { name: string, qty: number, rev: number, cat: string }>(); // Product ID → metrics
+        const catMap = new Map<string, number>();                            // Category → revenue
 
         filteredBills.forEach(b => {
             b.items.forEach(item => {
-                const product = products.find(p => p.id === item.productId);
-                const category = product?.category || 'General';
+                const product = products.find(p => p.id === item.productId);  // Find product by ID
+                const category = product?.category || 'General';               // Default category to 'General'
 
-                const current = prodMap.get(item.productId) || { name: item.productName, qty: 0, rev: 0, cat: category };
-                const itemRevenue = item.discountedAmount || item.amount;
+                const current = prodMap.get(item.productId) || { name: item.productName, qty: 0, rev: 0, cat: category }; // Get existing or create new
+                const itemRevenue = item.discountedAmount || item.amount;     // Use discounted amount if available
                 prodMap.set(item.productId, {
                     ...current,
-                    qty: current.qty + item.quantity,
-                    rev: current.rev + itemRevenue
+                    qty: current.qty + item.quantity,                         // Add quantity sold
+                    rev: current.rev + itemRevenue                            // Add revenue
                 });
 
-                catMap.set(category, (catMap.get(category) || 0) + itemRevenue);
+                catMap.set(category, (catMap.get(category) || 0) + itemRevenue); // Add to category revenue
             });
         });
 
-        const allProducts = Array.from(prodMap.values());
-        const topByQty = [...allProducts].sort((a, b) => b.qty - a.qty).slice(0, 10);
-        const topByRev = [...allProducts].sort((a, b) => b.rev - a.rev).slice(0, 10);
+        const allProducts = Array.from(prodMap.values());                     // Get all product metrics
+        const topByQty = [...allProducts].sort((a, b) => b.qty - a.qty).slice(0, 10); // Top 10 by quantity
+        const topByRev = [...allProducts].sort((a, b) => b.rev - a.rev).slice(0, 10); // Top 10 by revenue
         
-        const categoryData = Array.from(catMap.entries()).map(([name, value]) => ({ name, value }));
+        const categoryData = Array.from(catMap.entries()).map(([name, value]) => ({ name, value })); // Convert to chart data
 
-        return { topByQty, topByRev, categoryData };
-    }, [filteredBills, products]);
+        return { topByQty, topByRev, categoryData };                           // Return product metrics
+    }, [filteredBills, products]);                                            // Recalculate when bills/products change
 
-    // --- 3. Staff Performance ---
+    // --- 3. Staff Performance — Revenue per salesperson, bill count, average bill value ---
     const staffMetrics = useMemo(() => {
         const metrics = salesPersons.map(sp => {
-            const spBills = filteredBills.filter(b => b.salesPersonId === sp.id || b.salesPersonName === sp.name);
-            const revenue = spBills.reduce((sum, b) => sum + b.grandTotal, 0);
-            const count = spBills.length;
-            const avg = count > 0 ? revenue / count : 0;
-            return { ...sp, revenue, count, avg };
+            const spBills = filteredBills.filter(b => b.salesPersonId === sp.id || b.salesPersonName === sp.name); // Get bills by this person
+            const revenue = spBills.reduce((sum, b) => sum + b.grandTotal, 0); // Total revenue generated
+            const count = spBills.length;                                     // Number of bills
+            const avg = count > 0 ? revenue / count : 0;                      // Average bill value
+            return { ...sp, revenue, count, avg };                            // Return person with metrics
         });
         
-        if (selectedSalesPerson === 'all') return metrics;
-        return metrics.filter(sp => sp.id.toString() === selectedSalesPerson);
-    }, [filteredBills, salesPersons, selectedSalesPerson]);
+        if (selectedSalesPerson === 'all') return metrics;                    // Return all if no filter
+        return metrics.filter(sp => sp.id.toString() === selectedSalesPerson); // Return filtered by selected person
+    }, [filteredBills, salesPersons, selectedSalesPerson]);                  // Recalculate when dependent data changes
 
-    // --- 4. GST Report (HSN) ---
+    // --- 4. GST Report (by HSN Code) — Tax breakdown, itemized tax calculation ---
     const gstMetrics = useMemo(() => {
-        const gstBills = filteredBills.filter(b => b.isGstBill);
-        const totalTaxable = gstBills.reduce((sum, b) => sum + b.taxableAmount, 0);
-        const totalCGST = gstBills.reduce((sum, b) => sum + b.cgstAmount, 0);
-        const totalSGST = gstBills.reduce((sum, b) => sum + b.sgstAmount, 0);
-        const totalIGST = gstBills.reduce((sum, b) => sum + (b.igstAmount || 0), 0);
+        const gstBills = filteredBills.filter(b => b.isGstBill);             // Keep only GST bills
+        const totalTaxable = gstBills.reduce((sum, b) => sum + b.taxableAmount, 0); // Sum taxable amount
+        const totalCGST = gstBills.reduce((sum, b) => sum + b.cgstAmount, 0); // Sum CGST (Central GST)
+        const totalSGST = gstBills.reduce((sum, b) => sum + b.sgstAmount, 0); // Sum SGST (State GST)
+        const totalIGST = gstBills.reduce((sum, b) => sum + (b.igstAmount || 0), 0); // Sum IGST (Integrated GST)
         
-        // HSN Summary
-        const hsnMap = new Map<string, { qty: number, taxable: number, tax: number }>();
+        // HSN Summary — Group by HSN code with tax calculations
+        const hsnMap = new Map<string, { qty: number, taxable: number, tax: number }>(); // HSN → metrics
         gstBills.forEach(b => {
             b.items.forEach(item => {
-                const hsn = item.hsnCode || 'N/A';
-                const cur = hsnMap.get(hsn) || { qty: 0, taxable: 0, tax: 0 };
+                const hsn = item.hsnCode || 'N/A';                            // Get HSN code or default to 'N/A'
+                const cur = hsnMap.get(hsn) || { qty: 0, taxable: 0, tax: 0 }; // Get existing or create new
                 
-                // Item taxable value (use discounted amount if available)
-                const itemTaxable = item.discountedAmount || item.amount; 
-                // Proportionally compute per-item tax from bill-level tax totals
-                const billTaxRate = b.taxableAmount > 0 ? (b.cgstAmount + b.sgstAmount + (b.igstAmount || 0)) / b.taxableAmount : 0;
-                const itemTax = itemTaxable * billTaxRate;
+                // Item taxable value (use discounted amount if available, else item amount)
+                const itemTaxable = item.discountedAmount || item.amount;    // taxable value for item
+                // Use per-item gstRate if available; fall back to bill-level average for legacy bills
+                const itemGstRate = item.gstRate != null
+                    ? item.gstRate / 100
+                    : (b.taxableAmount > 0 ? (b.cgstAmount + b.sgstAmount + (b.igstAmount || 0)) / b.taxableAmount : 0);
+                const itemTax = itemTaxable * itemGstRate;                    // Apply rate to item
 
                 hsnMap.set(hsn, {
-                    qty: cur.qty + item.quantity,
-                    taxable: cur.taxable + itemTaxable,
-                    tax: cur.tax + itemTax
+                    qty: cur.qty + item.quantity,                             // Add quantity
+                    taxable: cur.taxable + itemTaxable,                       // Add taxable value
+                    tax: cur.tax + itemTax                                    // Add tax amount
                 });
             });
         });
 
-        const hsnData = Array.from(hsnMap.entries()).map(([hsn, data]) => ({
-            hsn, ...data
-        }));
+        const hsnData = Array.from(hsnMap.entries()).map(([hsn, data]) => ({ hsn, ...data })); // Convert to array
 
-        return { totalTaxable, totalCGST, totalSGST, totalIGST, totalTax: totalCGST + totalSGST + totalIGST, hsnData };
-    }, [filteredBills]);
+        return { totalTaxable, totalCGST, totalSGST, totalIGST, totalTax: totalCGST + totalSGST + totalIGST, hsnData }; // Return GST metrics
+    }, [filteredBills]);                                                      // Recalculate when filtered bills change
 
     // --- 4.5. Stock History (Filtered by Date) ---
     const filteredStockHistory = useMemo(() => {
-        const start = new Date(startDate).getTime();
-        const end = new Date(endDate).setHours(23, 59, 59, 999);
+        const start = new Date(startDate).getTime();                           // Convert start date to timestamp
+        const end = new Date(endDate).setHours(23, 59, 59, 999);             // Convert end date to timestamp (end of day)
         return stockHistory.filter(s => {
-            const d = new Date(s.timestamp).getTime();
-            return d >= start && d <= end;
+            const d = new Date(s.timestamp).getTime();                        // Parse stock entry date
+            return d >= start && d <= end;                                    // Keep entries within date range
         });
-    }, [stockHistory, startDate, endDate]);
+    }, [stockHistory, startDate, endDate]);                                   // Recalculate when stock history or dates change
 
-    // --- 5. Customer Analytics ---
+    // --- 5. Customer Analytics — New vs returning, top customers ---
     const customerMetrics = useMemo(() => {
-        const custMap = new Map<number, { name: string, bills: number, rev: number }>();
-        const uniqueCustomers = new Set<number>();
-        let newCustomers = 0;
-        let returningCustomers = 0;
+        const custMap = new Map<number, { name: string, bills: number, rev: number }>(); // Customer ID → metrics
+        const uniqueCustomers = new Set<number>();                           // Unique customer IDs in period
+        let newCustomers = 0;                                                 // Count of new customers
+        let returningCustomers = 0;                                           // Count of returning customers
 
         filteredBills.forEach(b => {
-            uniqueCustomers.add(b.customerId);
-            const cur = custMap.get(b.customerId) || { name: b.customerName, bills: 0, rev: 0 };
+            uniqueCustomers.add(b.customerId);                                // Add to unique set
+            const cur = custMap.get(b.customerId) || { name: b.customerName, bills: 0, rev: 0 }; // Get existing or create
             custMap.set(b.customerId, {
                 name: b.customerName,
-                bills: cur.bills + 1,
-                rev: cur.rev + b.grandTotal
+                bills: cur.bills + 1,                                         // Increment bill count
+                rev: cur.rev + b.grandTotal                                   // Add revenue
             });
         });
 
-        // Determine New vs Returning
-        // "New" = First bill date is within range
-        // "Returning" = First bill date is before start date
-        // Need to check ALL bills for this
-        const custFirstBillDate = new Map<number, number>();
+        // Determine New vs Returning customers by checking first bill date
+        // "New" = First bill date is within selected range
+        // "Returning" = First bill date is before selected start date
+        const custFirstBillDate = new Map<number, number>();                // Customer ID → first bill timestamp
         allBills.forEach(b => {
-            const d = new Date(b.date).getTime();
-            if (!custFirstBillDate.has(b.customerId) || d < custFirstBillDate.get(b.customerId)!) {
-                custFirstBillDate.set(b.customerId, d);
+            const d = new Date(b.date).getTime();                             // Parse date to timestamp
+            if (!custFirstBillDate.has(b.customerId) || d < custFirstBillDate.get(b.customerId)!) { // Check if this is first bill
+                custFirstBillDate.set(b.customerId, d);                       // Store first bill date
             }
         });
 
-        const startTs = new Date(startDate).getTime();
+        const startTs = new Date(startDate).getTime();                        // Convert selected start date to timestamp
         uniqueCustomers.forEach(cid => {
-            const firstDate = custFirstBillDate.get(cid) || 0;
-            if (firstDate >= startTs) newCustomers++;
-            else returningCustomers++;
+            const firstDate = custFirstBillDate.get(cid) || 0;               // Get customer's first bill date
+            if (firstDate >= startTs) newCustomers++;                          // If first bill in range, they're new
+            else returningCustomers++;                                         // Otherwise they're returning
         });
 
-        const topCustomers = Array.from(custMap.values()).sort((a,b) => b.rev - a.rev).slice(0, 10);
+        const topCustomers = Array.from(custMap.values()).sort((a,b) => b.rev - a.rev).slice(0, 10); // Top 10 by revenue
 
-        return { newCustomers, returningCustomers, topCustomers };
-    }, [filteredBills, allBills, startDate]);
+        return { newCustomers, returningCustomers, topCustomers };            // Return customer metrics
+    }, [filteredBills, allBills, startDate]);                                // Recalculate when bills or dates change
 
-    // --- Export Functionality ---
+    // --- Export Functionality — Convert report data to CSV format ---
     const csvEscape = (val: string | number): string => {
-        if (typeof val === 'number') return val.toFixed(2);
-        const s = String(val);
-        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-            return `"${s.replace(/"/g, '""')}"`;
+        if (typeof val === 'number') return val.toFixed(2);                  // Format numbers to 2 decimal places
+        const s = String(val);                                               // Convert to string if not already
+        if (s.includes(',') || s.includes('"') || s.includes('\n')) {       // If value needs escaping
+            return `"${s.replace(/"/g, '""')}"`;                             // Wrap in quotes and escape internal quotes
         }
-        return s;
+        return s;                                                             // Return plain value if no special chars
     };
 
     const handleExport = async () => {
-        let headers: string[] = [];
-        let rows: (string | number)[][] = [];
-        let filename = `report_${activeTab}_${startDate}_${endDate}.csv`;
+        let headers: string[] = [];                                           // CSV column headers
+        let rows: (string | number)[][] = [];                                // CSV data rows
+        let filename = `report_${activeTab}_${startDate}_${endDate}.csv`;    // Filename with report type and date range
 
-        switch(activeTab) {
+        switch(activeTab) {                                                   // Export different formats based on active tab
             case 'sales':
-                headers = ["Date", "Sales Amount"];
-                rows = salesMetrics.dailyData.map(d => [d.date, d.total]);
+                headers = ["Date", "Sales Amount"];                          // Sales report columns
+                rows = salesMetrics.dailyData.map(d => [d.date, d.total]);  // Map daily data to rows
                 break;
             case 'products':
-                headers = ["Product Name", "Category", "Quantity Sold", "Revenue"];
-                rows = productMetrics.topByRev.map(p => [p.name, p.cat, p.qty, p.rev]);
+                headers = ["Product Name", "Category", "Quantity Sold", "Revenue"]; // Product report columns
+                rows = productMetrics.topByRev.map(p => [p.name, p.cat, p.qty, p.rev]); // Map product data
                 break;
             case 'staff':
-                headers = ["Sales Person", "Bills Generated", "Total Revenue", "Avg Bill Value"];
-                rows = staffMetrics.map(s => [s.name, s.count, s.revenue, s.avg]);
+                headers = ["Sales Person", "Bills Generated", "Total Revenue", "Avg Bill Value"]; // Staff report columns
+                rows = staffMetrics.map(s => [s.name, s.count, s.revenue, s.avg]); // Map staff data
                 break;
             case 'gst':
-                headers = ["HSN Code", "Quantity", "Taxable Value", "Tax Amount", "Total Amount"];
-                rows = gstMetrics.hsnData.map(h => [h.hsn, h.qty, h.taxable, h.tax, h.taxable + h.tax]);
+                headers = ["HSN Code", "Quantity", "Taxable Value", "Tax Amount", "Total Amount"]; // GST report columns
+                rows = gstMetrics.hsnData.map(h => [h.hsn, h.qty, h.taxable, h.tax, h.taxable + h.tax]); // Map HSN data
                 break;
             case 'customers':
-                headers = ["Customer Name", "Bills Count", "Total Spend"];
-                rows = customerMetrics.topCustomers.map(c => [c.name, c.bills, c.rev]);
+                headers = ["Customer Name", "Bills Count", "Total Spend"];   // Customer report columns
+                rows = customerMetrics.topCustomers.map(c => [c.name, c.bills, c.rev]); // Map customer data
                 break;
             case 'stock':
-                headers = ["Date", "Product", "Change", "Reason", "Notes"];
-                rows = filteredStockHistory.map(s => [s.timestamp, s.productName, s.changeAmount, s.reason, s.referenceId || '']);
+                headers = ["Date", "Product", "Change", "Reason", "Notes"]; // Stock history columns
+                rows = filteredStockHistory.map(s => [s.timestamp, s.productName, s.changeAmount, s.reason, s.referenceId || '']); // Map stock data
                 break;
         }
 
-        const csvContent = [headers.join(","), ...rows.map(r => r.map(csvEscape).join(","))].join("\n");
-        const { saveCsvFile } = await import('../utils');
-        await saveCsvFile(filename, csvContent);
+        const csvContent = [headers.join(","), ...rows.map(r => r.map(csvEscape).join(","))].join("\n"); // Build CSV string
+        const { saveCsvFile } = await import('../utils');                     // Import CSV save helper
+        await saveCsvFile(filename, csvContent);                              // Save CSV file
     };
 
     const handlePrint = () => {
-        window.print();
+        window.print();                                                       // Trigger browser print dialog
     };
 
-    // --- Components ---
+    // --- Components & Styling ---
     const kpiColorMap: Record<string, { iconBg: string; iconText: string }> = {
-        'green': { iconBg: 'bg-green-100', iconText: 'text-green-600' },
-        'blue': { iconBg: 'bg-blue-100', iconText: 'text-blue-600' },
-        'purple': { iconBg: 'bg-purple-100', iconText: 'text-purple-600' },
-        'amber': { iconBg: 'bg-amber-100', iconText: 'text-amber-600' },
-        'gray': { iconBg: 'bg-gray-100', iconText: 'text-gray-600' },
+        'green': { iconBg: 'bg-green-100', iconText: 'text-green-600' },  // Green background and text colors
+        'blue': { iconBg: 'bg-blue-100', iconText: 'text-blue-600' },    // Blue background and text colors
+        'purple': { iconBg: 'bg-purple-100', iconText: 'text-purple-600' }, // Purple background and text colors
+        'amber': { iconBg: 'bg-amber-100', iconText: 'text-amber-600' }, // Amber/yellow background and text colors
+        'gray': { iconBg: 'bg-gray-100', iconText: 'text-gray-600' },    // Gray background and text colors
     };
 
     const KpiCard = ({ title, value, subtext, icon: Icon, color }: any) => {
-        // Extract base color name (e.g. "green" from "text-green-600 bg-green-600")
-        const colorName = Object.keys(kpiColorMap).find(c => color.includes(c)) || 'gray';
-        const { iconBg, iconText } = kpiColorMap[colorName];
+        // Extract base color name (e.g. "green" from "text-green-600 bg-green-600") — parse color from prop
+        const colorName = Object.keys(kpiColorMap).find(c => color.includes(c)) || 'gray'; // Find matching color
+        const { iconBg, iconText } = kpiColorMap[colorName];               // Get styles for color
         return (
-            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
-                <div className={`p-3 rounded-lg mr-4 ${iconBg}`}>
-                    <Icon size={24} className={iconText} />
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center"> {/* KPI card container */}
+                <div className={`p-3 rounded-lg mr-4 ${iconBg}`}>            {/* Icon container with background */}
+                    <Icon size={24} className={iconText} />                 {/* Icon component with color */}
                 </div>
-                <div>
-                    <p className="text-sm text-gray-500 font-medium">{title}</p>
-                    <h3 className="text-xl font-bold text-gray-800">{value}</h3>
-                    {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>}
+                <div>                                                        {/* Text content container */}
+                    <p className="text-sm text-gray-500 font-medium">{title}</p> {/* KPI label */}
+                    <h3 className="text-xl font-bold text-gray-800">{value}</h3> {/* KPI value */}
+                    {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>} {/* Optional subtext */}
                 </div>
             </div>
         );
     };
 
-    const COLORS_CHART = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+    const COLORS_CHART = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d']; // Colors for pie charts
 
     return (
         <div className="space-y-6 pb-12">
-            {/* Header / Filter Bar */}
+            {/* Header / Filter Bar — Tab selector, date range picker, print/export buttons */}
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200 no-print">
                 <div className="flex flex-wrap gap-2">
                     {[
@@ -347,10 +346,10 @@ const Reports: React.FC = () => {
                 </div>
             </div>
 
-            {/* Content Area */}
+            {/* Content Area — Display report based on active tab */}
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                 
-                {/* --- SALES SUMMARY --- */}
+                {/* --- SALES SUMMARY TAB --- Revenue trend, KPIs, daily sales line chart */}
                 {activeTab === 'sales' && (
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -375,7 +374,7 @@ const Reports: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- PRODUCT ANALYSIS --- */}
+                {/* --- PRODUCT ANALYSIS TAB --- Top products by revenue/qty, category pie chart */}
                 {activeTab === 'products' && (
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -450,7 +449,7 @@ const Reports: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- GST REPORTS --- */}
+                {/* --- GST REPORTS TAB --- Tax breakdown by HSN code, CGST/SGST/IGST output totals */}
                 {activeTab === 'gst' && (
                     <div className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -491,7 +490,7 @@ const Reports: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- SALES TEAM --- */}
+                {/* --- SALES TEAM TAB --- Staff performance with filter by person, revenue per person, avg bill */}
                 {activeTab === 'staff' && (
                     <div className="space-y-6">
                          <div className="bg-white p-4 rounded-xl shadow-sm border flex items-center gap-4">
@@ -534,7 +533,7 @@ const Reports: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- CUSTOMERS --- */}
+                {/* --- CUSTOMERS TAB --- New vs returning customers, top 10 customers by spend */}
                 {activeTab === 'customers' && (
                     <div className="space-y-6">
                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -566,7 +565,7 @@ const Reports: React.FC = () => {
                     </div>
                 )}
 
-                {/* --- STOCK HISTORY --- */}
+                {/* --- STOCK HISTORY TAB --- Filtered stock movements (add/remove) with reason and notes */}
                 {activeTab === 'stock' && (
                     <div className="bg-white p-6 rounded-xl shadow-sm border">
                         <h3 className="font-bold text-gray-700 mb-4">Stock Movement History</h3>

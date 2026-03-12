@@ -1,18 +1,26 @@
+// Import React for component creation
 import React from 'react';
 
+// Comment block explaining the Skeleton component system
+// Skeleton shimmer components for loading states.
 /* ====================================================
    Skeleton shimmer components for loading states.
    Uses a CSS shimmer animation defined in style.css.
    ==================================================== */
 
+// Define the shimmer animation class with gradient animation applied
 const shimmerClass = 'animate-shimmer bg-gradient-to-r from-gray-200 via-gray-100 to-gray-200 bg-[length:200%_100%] rounded';
 
+// Generic skeleton block component
 /** Generic skeleton block */
-export const Skeleton: React.FC<{ className?: string }> = ({ className = '' }) => (
-  <div className={`${shimmerClass} ${className}`} />
+// Export generic Skeleton component for flexible sizing
+export const Skeleton: React.FC<{ className?: string; style?: React.CSSProperties }> = ({ className = '', style }) => (
+  <div className={`${shimmerClass} ${className}`} style={style} />
 );
 
+// Skeleton component for stat cards on the Dashboard
 /** Skeleton for stat cards on the Dashboard */
+// Export skeleton for dashboard stat cards
 export const StatCardSkeleton: React.FC = () => (
   <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center">
     <Skeleton className="w-14 h-14 rounded-full mr-4" />
@@ -62,7 +70,6 @@ export const TableSkeleton: React.FC<{ rows?: number; cols?: number }> = ({ rows
         <Skeleton key={i} className="h-4 flex-1" />
       ))}
     </div>
-    {/* Rows */}
     {Array.from({ length: rows }).map((_, r) => (
       <div key={r} className="px-4 py-3 border-t border-gray-100 flex gap-4 items-center">
         {Array.from({ length: cols }).map((_, c) => (
@@ -109,4 +116,5 @@ export const SettingsSkeleton: React.FC = () => (
   </div>
 );
 
+// Export Skeleton types as default
 export default Skeleton;

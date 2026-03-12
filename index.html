@@ -17,7 +17,7 @@
 
       /* Print styles for Invoice and Reports */
       @media print {
-        @page { margin: 0; }
+        @page { size: A4; margin: 10mm; }
 
         /* For Billing (Invoice) - #printable-area takes priority */
         body {
@@ -31,7 +31,7 @@
           top: 0;
           width: 100%;
           margin: 0;
-          padding: 20px;
+          padding: 0;
           background: white;
         }
 

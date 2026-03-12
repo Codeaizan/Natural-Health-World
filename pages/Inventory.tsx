@@ -1,254 +1,254 @@
-import React, { useEffect, useState } from 'react';
-import { Product } from '../types';
-import { StorageService } from '../services/storage';
-import { COLORS, CATEGORIES } from '../constants';
-import { Plus, Search, Trash2, Edit2, AlertCircle, Download, Upload, Filter, Calculator, History, X, DollarSign } from 'lucide-react';
-import { searchMatch } from '../utils';
-import { useToast } from '../components/Toast';
-import { TableSkeleton } from '../components/Skeleton';
-import EmptyState from '../components/EmptyState';
+import React, { useEffect, useState } from 'react'; // React core + hooks for state and side-effects
+import { Product } from '../types';                   // Product type from types.ts — defines all inventory item properties
+import { StorageService } from '../services/storage'; // Unified storage service — fetch/save/delete products from SQLite/IndexedDB
+import { COLORS, CATEGORIES } from '../constants';    // App colour tokens and product category list (\"General\", \"Pharma\", etc.)
+import { Plus, Search, Trash2, Edit2, AlertCircle, Download, Upload, Filter, Calculator, History, X, DollarSign } from 'lucide-react'; // Icons for buttons and alerts
+import { searchMatch } from '../utils';               // Utility function — fuzzy search across product name/category/HSN/batch
+import { useToast } from '../components/Toast';       // Toast notification hook — success/error/warning/confirm messages
+import { TableSkeleton } from '../components/Skeleton'; // Loading placeholder while products are being fetched from DB
+import EmptyState from '../components/EmptyState';    // Empty state UI shown when products don't exist or search yields no results
 
+// Main inventory management page — CRUD for products, CSV import/export, stock adjustments, bulk pricing updates
 const Inventory: React.FC = () => {
-  const toast = useToast();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filterLowStock, setFilterLowStock] = useState(false);
+  const toast = useToast(); // Toast hook instance for user notifications
+  const [products, setProducts] = useState<Product[]>([]); // All products fetched from storage — state for re-rendering on changes
+  const [loading, setLoading] = useState(true);           // true while initial product list is being loaded from storage
+  const [search, setSearch] = useState('');               // Search query string — filtered in real-time as user types
+  const [filterLowStock, setFilterLowStock] = useState(false); // true when \"Filter Low Stock\" toggle is active
   
-  // Product Modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [currentProduct, setCurrentProduct] = useState<Partial<Product>>({});
+  // Product Edit/Create Modal state
+  const [isModalOpen, setIsModalOpen] = useState(false);         // true when the product edit/create modal is open
+  const [currentProduct, setCurrentProduct] = useState<Partial<Product>>({}); // Product object being edited (or empty {} for new product)
 
-  // Stock Adjustment Modal
-  const [isStockModalOpen, setIsStockModalOpen] = useState(false);
-  const [stockProduct, setStockProduct] = useState<Product | null>(null);
-  const [stockQty, setStockQty] = useState<number>(0);
-  const [stockAction, setStockAction] = useState<'add' | 'remove'>('add');
-  const [stockReason, setStockReason] = useState<string>('restock');
-  const [stockNotes, setStockNotes] = useState('');
+  // Stock Adjustment Modal state
+  const [isStockModalOpen, setIsStockModalOpen] = useState(false); // true when the stock adjustment modal is open
+  const [stockProduct, setStockProduct] = useState<Product | null>(null); // The specific product whose stock is being adjusted
+  const [stockQty, setStockQty] = useState<number>(0);    // Quantity to add or remove in the adjustment
+  const [stockAction, setStockAction] = useState<'add' | 'remove'>('add'); // Whether we're adding or removing stock
+  const [stockReason, setStockReason] = useState<string>('restock'); // Reason for adjustment (\"restock\", \"damage\", \"theft\", etc.)
+  const [stockNotes, setStockNotes] = useState('');       // User notes explaining the adjustment — mandatory field for traceability
 
-  // Bulk Update Modal
-  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
-  const [bulkAction, setBulkAction] = useState<'price_increase' | 'discount_update'>('price_increase');
-  const [bulkValue, setBulkValue] = useState<number>(0);
+  // Bulk Pricing Update Modal state
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false); // true when the bulk update modal is open
+  const [bulkAction, setBulkAction] = useState<'price_increase' | 'discount_update'>('price_increase'); // Action type: increase MRP % or set discount % for all
+  const [bulkValue, setBulkValue] = useState<number>(0);  // Percentage value for the bulk action
 
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null); // Hidden file input ref — used to trigger CSV file picker
 
   useEffect(() => {
-    loadProducts();
+    loadProducts();                                             // On component mount, fetch all products from storage
   }, []);
 
   const loadProducts = async () => {
-    const productsData = await StorageService.getProducts();
-    setProducts(productsData);
-    setLoading(false);
+    const productsData = await StorageService.getProducts();   // Fetch all products from database
+    setProducts(productsData);                                 // Update products state
+    setLoading(false);                                         // Clear loading state
   };
 
   const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentProduct.name || !currentProduct.mrp) return;
+    e.preventDefault();                                        // Prevent form default submission
+    if (!currentProduct.name || !currentProduct.mrp) return;   // Validate required fields (name, MRP) before saving
 
-    const discount = Number(currentProduct.discountPercent || 0);
-    const mrp = Number(currentProduct.mrp || 0);
-    const sellingPrice = mrp - (mrp * discount / 100);
+    const discount = Number(currentProduct.discountPercent || 0); // Parse discount as number (default 0 if empty)
+    const mrp = Number(currentProduct.mrp || 0);              // Parse MRP as number
+    const sellingPrice = mrp - (mrp * discount / 100);        // Calculate selling price = MRP - discount%
 
-    const newProduct: Product = {
-      id: currentProduct.id || 0,
-      name: currentProduct.name,
-      category: currentProduct.category || 'General',
-      hsnCode: currentProduct.hsnCode || '',
-      unit: currentProduct.unit || 'Nos',
-      packageSize: currentProduct.packageSize || '',
-      batchNumber: currentProduct.batchNumber || '',
-      expiryDate: currentProduct.expiryDate || '',
-      mrp: mrp,
-      discountPercent: discount,
-      sellingPrice: sellingPrice,
-      purchasePrice: Number(currentProduct.purchasePrice || 0),
-      gstRate: Number(currentProduct.gstRate || 5),
-      currentStock: Number(currentProduct.currentStock || 0),
-      minStockLevel: Number(currentProduct.minStockLevel || 10),
+    const newProduct: Product = {                              // Build complete product object with all fields
+      id: currentProduct.id || 0,                             // Keep existing ID if editing, 0 for new product (DB will generate)
+      name: currentProduct.name,                              // Product name
+      category: currentProduct.category || 'General',         // Default to 'General' if not specified
+      hsnCode: currentProduct.hsnCode || '',                  // HSN code for GST mapping (optional)
+      unit: currentProduct.unit || 'Nos',                     // Unit of measurement (default 'Nos' = Nos)
+      packageSize: currentProduct.packageSize || '',          // Package size description
+      batchNumber: currentProduct.batchNumber || '',          // Batch/lot number for tracking
+      expiryDate: currentProduct.expiryDate || '',            // Expiry date (for shelf-stable goods)
+      mrp: mrp,                                               // Maximum Retail Price
+      discountPercent: discount,                              // Discount percentage
+      sellingPrice: sellingPrice,                             // Final selling price after discount
+      purchasePrice: Number(currentProduct.purchasePrice || 0), // Cost price paid for product (for margin calc)
+      gstRate: Number(currentProduct.gstRate || 5),           // GST rate % (default 5%)
+      currentStock: Number(currentProduct.currentStock || 0), // Current inventory count
+      minStockLevel: Number(currentProduct.minStockLevel || 10), // Reorder point — alert if stock < this
     };
 
-    await StorageService.saveProduct(newProduct);
-    await loadProducts();
-    setIsModalOpen(false);
-    setCurrentProduct({});
+    await StorageService.saveProduct(newProduct);             // Save or update product in database
+    await loadProducts();                                      // Reload products list to reflect changes
+    setIsModalOpen(false);                                    // Close the modal
+    setCurrentProduct({});                                   // Reset form state
   };
 
   const handleDelete = async (id: number) => {
-    const ok = await toast.confirm({ title: 'Delete Product', message: 'Are you sure you want to delete this product?', danger: true, confirmText: 'Delete' });
+    const ok = await toast.confirm({ title: 'Delete Product', message: 'Are you sure you want to delete this product?', danger: true, confirmText: 'Delete' }); // Show confirmation dialog
     if (ok) {
-        await StorageService.deleteProduct(id);
-        await loadProducts();
-        toast.success('Product Deleted');
+        await StorageService.deleteProduct(id);              // Delete product from database
+        await loadProducts();                                 // Reload products list
+        toast.success('Product Deleted');                     // Show success toast
     }
   };
 
   const handleStockAdjustment = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if(!stockProduct || stockQty <= 0) return;
-      if(!stockNotes.trim()) {
-          toast.warning('Note Required', 'Please provide a note/reason for this adjustment.');
-          return;
+      e.preventDefault();                                     // Prevent form submission
+      if(!stockProduct || stockQty <= 0) return;             // Validate that a product is selected and qty > 0
+      if(!stockNotes.trim()) {                               // Ensure user provided a note/reason
+          toast.warning('Note Required', 'Please provide a note/reason for this adjustment.'); // Show warning toast
+          return;                                            // Abort if no notes
       }
 
-      // CRITICAL: Ensure inputs are numbers
-      const safeQty = Number(stockQty);
-      const current = Number(stockProduct.currentStock);
+      const safeQty = Number(stockQty);                      // Parse qty as number
+      const current = Number(stockProduct.currentStock);     // Get current stock level
 
-      if (stockAction === 'remove' && safeQty > current) {
-          toast.error('Stock Error', 'Cannot remove more stock than currently available.');
-          return;
+      if (stockAction === 'remove' && safeQty > current) {   // Validate we're not removing more than available
+          toast.error('Stock Error', 'Cannot remove more stock than currently available.'); // Show error toast
+          return;                                            // Abort if insufficient stock
       }
 
-      // If action is 'add', we send positive qty. If 'remove', we send negative.
-      // The storage service adds this value to current stock.
-      const quantityChange = stockAction === 'add' ? safeQty : -safeQty;
+      // Calculate signed quantity: positive for 'add', negative for 'remove'
+      // This value is added to the current stock by the storage service
+      const quantityChange = stockAction === 'add' ? safeQty : -safeQty; // Apply sign based on action
       
-      let historyReason = stockReason || 'adjustment';
+      let historyReason = stockReason || 'adjustment';       // Default reason if not provided
       
-      await StorageService.updateStock(
-          stockProduct.id, 
-          quantityChange, 
-          historyReason, 
-          stockNotes 
+      await StorageService.updateStock(                       // Call storage service to adjust stock
+          stockProduct.id,                                   // Product ID
+          quantityChange,                                    // Signed quantity delta
+          historyReason,                                     // Reason category (restock, damage, theft, etc.)
+          stockNotes                                         // User notes for audit trail
       );
 
-      await loadProducts();
-      setIsStockModalOpen(false);
-      resetStockForm();
+      await loadProducts();                                  // Reload products list with updated stock
+      setIsStockModalOpen(false);                           // Close stock modal
+      resetStockForm();                                     // Clear stock form state
   };
 
   const handleBulkUpdate = async () => {
-      const ok = await toast.confirm({ title: 'Bulk Update', message: `Apply this to ALL ${products.length} products?`, confirmText: 'Apply' });
-      if (!ok) return;
+      const ok = await toast.confirm({ title: 'Bulk Update', message: `Apply this to ALL ${products.length} products?`, confirmText: 'Apply' }); // Confirm bulk update affects all products
+      if (!ok) return;                                       // User cancelled bulk update
       
-      const updatedProducts = products.map(p => {
+      const updatedProducts = products.map(p => {           // Map over each product to apply the bulk action
           if (bulkAction === 'price_increase') {
-             // Increase MRP by %
-             const newMrp = p.mrp * (1 + (bulkValue / 100));
-             const newSell = newMrp - (newMrp * p.discountPercent / 100);
-             return { ...p, mrp: Number(newMrp.toFixed(2)), sellingPrice: Number(newSell.toFixed(2)) };
+             // Calculate new MRP with percentage increase
+             const newMrp = p.mrp * (1 + (bulkValue / 100)); // MRP * (1 + increase%)
+             const newSell = newMrp - (newMrp * p.discountPercent / 100); // Recalculate selling price with same discount%
+             return { ...p, mrp: Number(newMrp.toFixed(2)), sellingPrice: Number(newSell.toFixed(2)) }; // Return updated product
           } else {
-             // Set Discount %
-             const newSell = p.mrp - (p.mrp * bulkValue / 100);
-             return { ...p, discountPercent: bulkValue, sellingPrice: Number(newSell.toFixed(2)) };
+             // Set new discount percentage for all products
+             const newSell = p.mrp - (p.mrp * bulkValue / 100); // Recalculate selling price with new discount%
+             return { ...p, discountPercent: bulkValue, sellingPrice: Number(newSell.toFixed(2)) }; // Return updated product
           }
       });
       
       for (const p of updatedProducts) {
-        await StorageService.saveProduct(p);
+        await StorageService.saveProduct(p);                 // Save each updated product to database
       }
-      await loadProducts();
-      setIsBulkModalOpen(false);
-      toast.success('Bulk Update Complete');
+      await loadProducts();                                  // Reload products list from database
+      setIsBulkModalOpen(false);                            // Close bulk update modal
+      toast.success('Bulk Update Complete');                 // Show success toast
   };
 
   const resetStockForm = () => {
-      setStockProduct(null);
+      setStockProduct(null);                                 // Clear selected product
       setStockQty(0);
-      setStockAction('add');
-      setStockReason('restock');
-      setStockNotes('');
+      setStockAction('add');                                 // Reset action to 'add'
+      setStockReason('restock');                             // Reset reason to 'restock'
+      setStockNotes('');                                     // Clear notes
   };
 
   const openStockModal = (p: Product) => {
-      setStockProduct(p);
-      setStockQty(0);
-      setStockAction('add');
-      setStockReason('restock');
-      setStockNotes('');
-      setIsStockModalOpen(true);
+      setStockProduct(p);                                    // Set product to adjust
+      setStockQty(0);                                        // Reset qty to 0
+      setStockAction('add');                                 // Default to 'add'
+      setStockReason('restock');                             // Default reason to 'restock'
+      setStockNotes('');                                     // Clear notes
+      setIsStockModalOpen(true);                             // Open modal
   };
 
   // --- CSV Parser Helper ---
   const parseCSVLine = (line: string): string[] => {
-      const result: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-          const char = line[i];
-          if (char === '"') {
-              if (inQuotes && line[i + 1] === '"') {
-                  current += '"';
-                  i++;
+      const result: string[] = [];                           // Array to store parsed fields
+      let current = '';                                      // Current field being parsed
+      let inQuotes = false;                                  // Track if inside quoted field
+      for (let i = 0; i < line.length; i++) {               // Iterate through line characters
+          const char = line[i];                              // Current character
+          if (char === '"') {                                // If quote character
+              if (inQuotes && line[i + 1] === '"') {         // If in quotes and next is also quote
+                  current += '"';                            // Add escaped quote
+                  i++;                                       // Skip next quote
               } else {
-                  inQuotes = !inQuotes;
+                  inQuotes = !inQuotes;                      // Toggle quote state
               }
-          } else if (char === ',' && !inQuotes) {
-              result.push(current.trim());
-              current = '';
+          } else if (char === ',' && !inQuotes) {            // If comma outside quotes
+              result.push(current.trim());                   // Add field to result
+              current = '';                                  // Reset current field
           } else {
-              current += char;
+              current += char;                               // Add char to current field
           }
       }
-      result.push(current.trim());
-      return result;
+      result.push(current.trim());                           // Add final field
+      return result;                                         // Return parsed fields
   };
 
   // --- CSV Export/Import ---
   const handleExport = async (onlyLowStock: boolean = false) => {
-      const dataToExport = onlyLowStock 
-        ? products.filter(p => p.currentStock <= p.minStockLevel)
-        : products;
-      if(dataToExport.length === 0) { toast.warning('Nothing to Export', 'No products to export.'); return; }
-      const headers = ["Name", "Category", "HSN", "Unit", "Package Size", "MRP", "Discount %", "Purchase Price", "GST %", "Stock", "Min Stock"];
-      const csvEscape = (val: string) => {
-          if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-              return `"${val.replace(/"/g, '""')}"`;
+      const dataToExport = onlyLowStock                      // Determine which products to export
+        ? products.filter(p => p.currentStock <= p.minStockLevel) // Export only low stock items
+        : products;                                          // Or export all products
+      if(dataToExport.length === 0) { toast.warning('Nothing to Export', 'No products to export.'); return; } // Show warning if no data
+      const headers = ["Name", "Category", "HSN", "Unit", "Package Size", "MRP", "Discount %", "Purchase Price", "GST %", "Stock", "Min Stock"]; // CSV column headers
+      const csvEscape = (val: string) => {                   // Helper to escape CSV values with quotes/commas
+          if (val.includes(',') || val.includes('"') || val.includes('\n')) { // If value has special chars
+              return `"${val.replace(/"/g, '""')}"`;         // Wrap in quotes and escape internal quotes
           }
-          return val;
+          return val;                                        // Return plain value if no special chars
       };
-      const rows = dataToExport.map(p => [
-          csvEscape(p.name), csvEscape(p.category), csvEscape(p.hsnCode), csvEscape(p.unit), csvEscape(p.packageSize || ''),
-          p.mrp, p.discountPercent, p.purchasePrice, p.gstRate, p.currentStock, p.minStockLevel
-      ].join(","));
-      const csvContent = [headers.join(","), ...rows].join("\n");
-      const { saveCsvFile } = await import('../utils');
-      await saveCsvFile('inventory.csv', csvContent);
+      const rows = dataToExport.map(p => [                  // Build CSV rows from products
+          csvEscape(p.name), csvEscape(p.category), csvEscape(p.hsnCode), csvEscape(p.unit), csvEscape(p.packageSize || ''), // Name, Category, HSN, Unit, Package Size
+          p.mrp, p.discountPercent, p.purchasePrice, p.gstRate, p.currentStock, p.minStockLevel // MRP, Discount%, Purchase Price, GST%, Stock, Min Stock
+      ].join(","));                                          // Join columns with commas
+      const csvContent = [headers.join(","), ...rows].join("\n"); // Combine header and rows with newlines
+      const { saveCsvFile } = await import('../utils');      // Import CSV save utility
+      await saveCsvFile('inventory.csv', csvContent);        // Save CSV file with all products
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async (evt) => {
-          const text = evt.target?.result as string;
+      const file = e.target.files?.[0];                      // Get first file from input
+      if (!file) return;                                     // If no file, exit
+      const reader = new FileReader();                       // Create file reader
+      reader.onload = async (evt) => {                       // When file is read
+          const text = evt.target?.result as string;        // Get file contents as text
           try {
-             const lines = text.split("\n").filter(l => l.trim());
-             if (lines.length < 2) { toast.warning('Empty File', 'CSV file is empty.'); return; }
+             const lines = text.split("\n").filter(l => l.trim()); // Split by newlines and remove empty lines
+             if (lines.length < 2) { toast.warning('Empty File', 'CSV file is empty.'); return; } // Ensure header + at least 1 row
              
-             // Parse header to determine column order
-             const headerLine = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
-             const headers = headerLine.map(h => h.replace(/\s+\(.*?\)/, '')); // Remove "(INR)", "(YYYY-MM-DD)" etc
+             // Parse header to determine column positions/order
+             const headerLine = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim()); // Parse header row and lowercase
+             const headers = headerLine.map(h => h.replace(/\s+\(.*?\)/, '')); // Remove "(INR)", "(YYYY-MM-DD)" suffix from headers
              
-             // Detect which format we're dealing with
-             const hasProduct = headers.some(h => h.includes('product') || h.includes('name'));
-             const hasMRP = headers.some(h => h.includes('mrp'));
-             const hasPackage = headers.some(h => h.includes('package') || h.includes('size'));
+             // Validate that CSV has required columns
+             const hasProduct = headers.some(h => h.includes('product') || h.includes('name')); // Check for name/product column
+             const hasMRP = headers.some(h => h.includes('mrp'));  // Check for MRP column
+             const hasPackage = headers.some(h => h.includes('package') || h.includes('size')); // Check for package/size column
              
-             if (!hasProduct || !hasMRP) {
-                 toast.error('Invalid CSV', "CSV must have 'Product' and 'MRP' columns.");
-                 return;
+             if (!hasProduct || !hasMRP) {                   // If missing required columns
+                 toast.error('Invalid CSV', "CSV must have 'Product' and 'MRP' columns."); // Show error
+                 return;                                    // Exit
              }
              
-             // Find column indices
-             const productIdx = headers.findIndex(h => h.includes('product') || h.includes('name'));
-             const packageIdx = headers.findIndex(h => h.includes('package') || h.includes('size'));
-             const mrpIdx = headers.findIndex(h => h.includes('mrp'));
-             const categoryIdx = headers.findIndex(h => h.includes('category'));
-             const hsnIdx = headers.findIndex(h => h.includes('hsn'));
-             const unitIdx = headers.findIndex(h => h.includes('unit') && !h.includes('package'));
-             const _batchIdx = headers.findIndex(h => h.includes('batch'));
-             const _expiryIdx = headers.findIndex(h => h.includes('expiry'));
-             const discIdx = headers.findIndex(h => h.includes('discount'));
-             const purchIdx = headers.findIndex(h => h.includes('purchase'));
-             const gstIdx = headers.findIndex(h => h.includes('gst'));
-             const stockIdx = headers.findIndex(h => h.includes('stock') && !h.includes('min'));
-             const minStockIdx = headers.findIndex(h => h.includes('min'));
+             // Find column indices by searching header names
+             const productIdx = headers.findIndex(h => h.includes('product') || h.includes('name')); // Product name column
+             const packageIdx = headers.findIndex(h => h.includes('package') || h.includes('size')); // Package size column
+             const mrpIdx = headers.findIndex(h => h.includes('mrp'));    // MRP column
+             const categoryIdx = headers.findIndex(h => h.includes('category')); // Category column
+             const hsnIdx = headers.findIndex(h => h.includes('hsn'));    // HSN code column
+             const unitIdx = headers.findIndex(h => h.includes('unit') && !h.includes('package')); // Unit column (not "package unit")
+             const _batchIdx = headers.findIndex(h => h.includes('batch')); // Batch number column (unused for now)
+             const _expiryIdx = headers.findIndex(h => h.includes('expiry')); // Expiry date column (unused for now)
+             const discIdx = headers.findIndex(h => h.includes('discount')); // Discount % column
+             const purchIdx = headers.findIndex(h => h.includes('purchase')); // Purchase price column
+             const gstIdx = headers.findIndex(h => h.includes('gst'));    // GST % column
+             const stockIdx = headers.findIndex(h => h.includes('stock') && !h.includes('min')); // Current stock column
+             const minStockIdx = headers.findIndex(h => h.includes('min')); // Min stock level column
              
-             // Ask user if they want to clear existing products first
+             // Ask user: Clear existing products or merge with import?
              const clearFirst = await toast.confirm({
                  title: 'Import Mode',
                  message: 'Do you want to clear all existing products before importing?\n\nConfirm to clear and import fresh, Cancel to merge with existing products.',
@@ -257,113 +257,115 @@ const Inventory: React.FC = () => {
                  danger: true
              });
              
-             if (clearFirst) {
-                 await StorageService.deleteAllProducts();
+             if (clearFirst) {                               // If user chose to clear
+                 await StorageService.deleteAllProducts();   // Delete all existing products
                  // Small delay to ensure database clear completes
-                 await new Promise(resolve => setTimeout(resolve, 100));
+                 await new Promise(resolve => setTimeout(resolve, 100)); // Wait 100ms for DB
              }
              
-             let count = 0;
-             let errors: string[] = [];
+             let count = 0;                                  // Counter for successful imports
+             let errors: string[] = [];                      // Array to track import errors
              
-             for(let i = 1; i < lines.length; i++) {
-                 const cols = parseCSVLine(lines[i]).map(c => c.replace(/^"|"$/g, '').trim());
-                 if(cols.length < 2) continue;
+             for(let i = 1; i < lines.length; i++) {        // Loop through data rows (skip header at i=0)
+                 const cols = parseCSVLine(lines[i]).map(c => c.replace(/^"|"$/g, '').trim()); // Parse row and trim quotes
+                 if(cols.length < 2) continue;              // Skip rows with fewer than 2 columns
                  
-                 // Extract values with fallbacks
-                 const name = cols[productIdx] || '';
-                 const mrpStr = cols[mrpIdx] || '0';
-                 const mprNum = parseFloat(mrpStr);
+                 // Extract and validate core fields
+                 const name = cols[productIdx] || '';        // Get product name
+                 const mrpStr = cols[mrpIdx] || '0';         // Get MRP string
+                 const mprNum = parseFloat(mrpStr);          // Parse MRP as number
                  
-                 if (!name || isNaN(mprNum) || mprNum <= 0) {
-                     if (name) errors.push(`Row ${i}: Missing or invalid MRP for "${name}"`);
-                     continue;
+                 if (!name || isNaN(mprNum) || mprNum <= 0) { // Validate name and MRP > 0
+                     if (name) errors.push(`Row ${i}: Missing or invalid MRP for "${name}"`); // Log error if name exists
+                     continue;                              // Skip invalid row
                  }
                  
-                 // Extract package size if present, otherwise use empty
-                 let packageSize = '';
-                 let unit = 'Nos';
-                 if (packageIdx >= 0) {
-                     packageSize = cols[packageIdx] || '';
+                 // Extract package size and unit (with fallback logic)
+                 let packageSize = '';                       // Default empty package size
+                 let unit = 'Nos';                           // Default unit to 'Nos'
+                 if (packageIdx >= 0) {                      // If package column exists
+                     packageSize = cols[packageIdx] || '';   // Get package size value
                      // Try to extract unit from package size (e.g., "30 nos" -> unit="nos", size="30")
-                     const match = packageSize.match(/(\d+)\s*([a-zA-Z]+)/);
-                     if (match) {
-                         unit = match[2];
+                     const match = packageSize.match(/(\d+)\s*([a-zA-Z]+)/); // Match pattern: number + letters
+                     if (match) {                            // If pattern found
+                         unit = match[2];                    // Extract unit from regex group
                      }
                  }
-                 if (unitIdx >= 0) unit = cols[unitIdx] || unit;
+                 if (unitIdx >= 0) unit = cols[unitIdx] || unit; // Override with explicit unit column if exists
                  
+                 // Build new product object with parsed data
                  const newP: Product = {
-                     id: 0,
-                     name: name,
-                     category: categoryIdx >= 0 ? (cols[categoryIdx] || 'General') : 'General',
-                     hsnCode: hsnIdx >= 0 ? (cols[hsnIdx] || '') : '',
-                     unit: unit,
-                     packageSize: packageSize,
-                     batchNumber: '',
-                     expiryDate: '',
-                     mrp: mprNum,
-                     discountPercent: discIdx >= 0 ? (parseFloat(cols[discIdx]) || 0) : 0,
-                     purchasePrice: purchIdx >= 0 ? (parseFloat(cols[purchIdx]) || 0) : 0,
-                     gstRate: gstIdx >= 0 ? (parseFloat(cols[gstIdx]) || 5) : 5,
-                     currentStock: stockIdx >= 0 ? (parseFloat(cols[stockIdx]) || 0) : 0,
-                     minStockLevel: minStockIdx >= 0 ? (parseFloat(cols[minStockIdx]) || 10) : 10,
-                     sellingPrice: mprNum - (mprNum * ((discIdx >= 0 ? parseFloat(cols[discIdx]) : 0) || 0) / 100)
+                     id: 0,                                  // Auto-generate ID on save
+                     name: name,                             // Product name
+                     category: categoryIdx >= 0 ? (cols[categoryIdx] || 'General') : 'General', // Category from CSV or default 'General'
+                     hsnCode: hsnIdx >= 0 ? (cols[hsnIdx] || '') : '', // HSN code or empty
+                     unit: unit,                             // Unit (extracted or provided)
+                     packageSize: packageSize,               // Package size
+                     batchNumber: '',                        // Not imported from CSV
+                     expiryDate: '',                         // Not imported from CSV
+                     mrp: mprNum,                            // MRP
+                     discountPercent: discIdx >= 0 ? (parseFloat(cols[discIdx]) || 0) : 0, // Discount % or 0
+                     purchasePrice: purchIdx >= 0 ? (parseFloat(cols[purchIdx]) || 0) : 0, // Purchase price or 0
+                     gstRate: gstIdx >= 0 ? (parseFloat(cols[gstIdx]) || 5) : 5, // GST % or default 5%
+                     currentStock: stockIdx >= 0 ? (parseFloat(cols[stockIdx]) || 0) : 0, // Current stock or 0
+                     minStockLevel: minStockIdx >= 0 ? (parseFloat(cols[minStockIdx]) || 10) : 10, // Min stock or default 10
+                     sellingPrice: mprNum - (mprNum * ((discIdx >= 0 ? parseFloat(cols[discIdx]) : 0) || 0) / 100) // Calculate: MRP - discount
                  };
                  
                  try {
-                     await StorageService.saveProduct(newP);
-                     count++;
+                     await StorageService.saveProduct(newP); // Save to database
+                     count++;                                // Increment success counter
                  } catch (err) {
-                     const errMsg = (err as Error).message;
-                     errors.push(`Row ${i}: ${name} (${packageSize}) - ${errMsg.includes('duplicate') || errMsg.includes('unique') ? 'Duplicate product' : errMsg}`);
-                     console.error(`Failed to import row ${i}:`, err);
+                     const errMsg = (err as Error).message;  // Get error message
+                     errors.push(`Row ${i}: ${name} (${packageSize}) - ${errMsg.includes('duplicate') || errMsg.includes('unique') ? 'Duplicate product' : errMsg}`); // Add error to list
+                     console.error(`Failed to import row ${i}:`, err); // Log error to console
                  }
              }
              
-             if (count === 0) {
-                 toast.error('Import Failed', 'No valid products found. Check CSV format.');
-             } else {
-                 let msg = `${count} products imported successfully.`;
-                 if (errors.length > 0) {
-                     msg += ` ${errors.length} rows failed.`;
+             // Show import summary
+             if (count === 0) {                              // If no products imported
+                 toast.error('Import Failed', 'No valid products found. Check CSV format.'); // Show error toast
+             } else {                                        // If some products imported
+                 let msg = `${count} products imported successfully.`; // Base success message
+                 if (errors.length > 0) {                   // If there were errors
+                     msg += ` ${errors.length} rows failed.`; // Add error count to message
                  }
-                 toast.success('Import Complete', msg);
+                 toast.success('Import Complete', msg);      // Show success toast
              }
-             await loadProducts();
-          } catch (err) { console.error(err); toast.error('CSV Error', 'Failed to parse CSV: ' + (err as Error).message); }
+             await loadProducts();                           // Reload products from database
+          } catch (err) { console.error(err); toast.error('CSV Error', 'Failed to parse CSV: ' + (err as Error).message); } // Log any parsing errors
       };
-      reader.readAsText(file);
-      e.target.value = '';
+      reader.readAsText(file);                               // Read file as text
+      e.target.value = '';                                  // Reset input value
   };
 
-  const openEdit = (p: Product) => { setCurrentProduct(p); setIsModalOpen(true); };
-  const openNew = () => { setCurrentProduct({ category: 'General', gstRate: 5, discountPercent: 0, unit: 'Nos', minStockLevel: 10 }); setIsModalOpen(true); };
-  const checkExpiry = (dateStr?: string) => {
-      if(!dateStr) return false;
-      const today = new Date(); const exp = new Date(dateStr);
-      if(isNaN(exp.getTime())) return false;
-      const diffTime = exp.getTime() - today.getTime();
-      return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= 30;
+  const openEdit = (p: Product) => { setCurrentProduct(p); setIsModalOpen(true); }; // Populate form and open edit modal
+  const openNew = () => { setCurrentProduct({ category: 'General', gstRate: 5, discountPercent: 0, unit: 'Nos', minStockLevel: 10 }); setIsModalOpen(true); }; // Open new product modal with defaults
+  const checkExpiry = (dateStr?: string) => {                // Check if date is within 30 days of expiry
+      if(!dateStr) return false;                             // No date = not expiring soon
+      const today = new Date(); const exp = new Date(dateStr); // Parse dates
+      if(isNaN(exp.getTime())) return false;                 // Invalid date format
+      const diffTime = exp.getTime() - today.getTime();      // Days until expiry in milliseconds
+      return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) <= 30; // True if <= 30 days away
   };
 
-  // Filter & Valuation
+  // Filter products based on search and low-stock toggle
   const filteredProducts = products.filter(p => {
-    const matchesSearch = searchMatch(`${p.name} ${p.category} ${p.hsnCode || ''} ${p.batchNumber || ''}`, search);
-    const matchesLowStock = filterLowStock ? p.currentStock <= p.minStockLevel : true;
-    return matchesSearch && matchesLowStock;
+    const matchesSearch = searchMatch(`${p.name} ${p.category} ${p.hsnCode || ''} ${p.batchNumber || ''}`, search); // Search across name, category, HSN, batch
+    const matchesLowStock = filterLowStock ? p.currentStock <= p.minStockLevel : true; // Filter for low stock if toggle enabled
+    return matchesSearch && matchesLowStock;                 // Return only products matching both conditions
   });
 
+  // Calculate total inventory valuation (cost value)
   const filteredValuation = filteredProducts.reduce((sum, p) => {
-      // Force Number conversion for safety
-      const price = Number(p.purchasePrice) || 0;
-      const stock = Number(p.currentStock) || 0;
-      return sum + (stock * price);
-  }, 0);
+      const price = Number(p.purchasePrice) || 0;           // Safe number conversion for purchase price
+      const stock = Number(p.currentStock) || 0;            // Safe number conversion for stock qty
+      return sum + (stock * price);                         // Add (qty * cost) to running total
+  }, 0);                                                     // Start with 0
 
   return (
     <div>
-      {/* Header Actions */}
+      {/* Header Actions and Search/Filter Bar */}
       <div className="flex flex-col gap-4 mb-6">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <h2 className="text-2xl font-bold text-gray-800 flex items-center">
@@ -463,7 +465,7 @@ const Inventory: React.FC = () => {
 
       {/* Product Edit/Add Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 animate-overlayFade">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-slideUp">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center">
               <h3 className="text-xl font-bold text-gray-800">{currentProduct.id ? 'Edit Product' : 'New Product'}</h3>
@@ -495,7 +497,7 @@ const Inventory: React.FC = () => {
 
       {/* Advanced Stock Adjustment Modal */}
       {isStockModalOpen && stockProduct && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 animate-overlayFade">
               <div className="bg-white rounded-xl shadow-lg w-full max-w-md animate-slideUp">
                 <div className="p-4 border-b border-gray-100 flex justify-between items-center">
                     <div>
@@ -520,7 +522,7 @@ const Inventory: React.FC = () => {
 
       {/* Bulk Update Modal */}
       {isBulkModalOpen && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 animate-overlayFade">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 animate-overlayFade">
                <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6 animate-slideUp">
                    <h3 className="text-lg font-bold mb-4">Bulk Update</h3>
                    <div className="space-y-4">

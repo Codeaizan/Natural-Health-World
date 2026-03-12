@@ -1,41 +1,41 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StorageService } from '../services/storage';
-import { Product, Customer, SalesPerson, CartItem, Bill, BillItem, CompanySettings } from '../types';
-import { COLORS } from '../constants';
-import { Search, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, Download } from 'lucide-react';
-import { searchMatch, numberToWords } from '../utils';
-import { useToast } from '../components/Toast';
-import html2pdf from 'html2pdf.js';
+import React, { useState, useEffect, useRef } from 'react';                  // React hooks for state and effects
+import { StorageService } from '../services/storage';                           // Database access service
+import { Product, Customer, SalesPerson, CartItem, Bill, BillItem, CompanySettings } from '../types'; // Type definitions
+import { COLORS } from '../constants';                                         // App color constants
+import { Search, Trash2, Printer, CheckCircle, Users, X, Save, Eraser, Instagram, Phone, Mail, Download } from 'lucide-react'; // Icons
+import { searchMatch, numberToWords } from '../utils';                         // Utility functions for search and amount-to-words
+import { generateInvoicePDF, generateInvoicePDFBlob } from '../services/pdfGenerator'; // PDF generation functions
+import { useToast } from '../components/Toast';                                 // Toast notification system
 
 const Billing: React.FC = () => {
-  const toast = useToast();
-  // State
-  const [products, setProducts] = useState<Product[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
-  const [settings, setSettings] = useState<CompanySettings | null>(null);
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const toast = useToast();                                                    // Toast notification system
+  // Data State — Fetched from database
+  const [products, setProducts] = useState<Product[]>([]);                   // All products in inventory
+  const [customers, setCustomers] = useState<Customer[]>([]);                 // All customers
+  const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);       // All sales staff
+  const [settings, setSettings] = useState<CompanySettings | null>(null);    // Company settings (name, address, logo, etc)
+  const [cart, setCart] = useState<CartItem[]>([]);                          // Current bill items cart
   
-  // Selection
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [productSearch, setProductSearch] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  // Selection State — Current selections for billing
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null); // Product being added to cart
+  const [productSearch, setProductSearch] = useState('');                    // Product search/filter text
+  const [quantity, setQuantity] = useState(1);                               // Quantity for product being added
   
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null); // Bill customer
+  const [customerSearch, setCustomerSearch] = useState('');                  // Customer search/filter text
   
-  const [selectedSalesPerson, setSelectedSalesPerson] = useState<number>(0);
-  const [isGstBill, setIsGstBill] = useState(false);
+  const [selectedSalesPerson, setSelectedSalesPerson] = useState<number>(0); // Sales person generating bill
+  const [isGstBill, setIsGstBill] = useState(false);                         // Whether bill is GST-enabled (tax calculation)
 
-  const [lastBill, setLastBill] = useState<Bill | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [lastBill, setLastBill] = useState<Bill | null>(null);              // Last generated bill (for display/actions after save)
+  const [isSaving, setIsSaving] = useState(false);                           // Loading state during bill save
 
-  // Ref for PDF download
-  const printableRef = useRef<HTMLDivElement>(null);
+  // Ref for PDF printing area
+  const printableRef = useRef<HTMLDivElement>(null);                         // DOM ref to invoice element for printing
 
   // New Customer Modal State
-  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
-  const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({});
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);     // Show/hide new customer dialog
+  const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({});    // Form data for new customer
 
   useEffect(() => {
     const loadData = async () => {
@@ -59,35 +59,36 @@ const Billing: React.FC = () => {
   // -- Handlers --
 
   const addToCart = () => {
+    // Add product to cart with stock validation
     if (!selectedProduct) return;
     
     // Check if immediate quantity exceeds stock
     if (quantity > selectedProduct.currentStock) {
-        toast.warning('Insufficient Stock', `Available: ${selectedProduct.currentStock}, Requested: ${quantity}`);
+        toast.warning('Insufficient Stock', `Available: ${selectedProduct.currentStock}, Requested: ${quantity}`); // Show warning stock exceeded
         return;
     }
 
-    const existingItem = cart.find(item => item.id === selectedProduct.id);
+    const existingItem = cart.find(item => item.id === selectedProduct.id); // Check if product already in cart
     if (existingItem) {
-        // Update
-        const newQty = existingItem.quantity + quantity;
-        if (newQty > selectedProduct.currentStock) {
-            toast.warning('Stock Limit', `Available: ${selectedProduct.currentStock}, In cart: ${existingItem.quantity}, Adding: ${quantity}`);
+        // Update quantity if already exists
+        const newQty = existingItem.quantity + quantity;                     // Calculate new total quantity
+        if (newQty > selectedProduct.currentStock) {                         // Validate total doesn't exceed stock
+            toast.warning('Stock Limit', `Available: ${selectedProduct.currentStock}, In cart: ${existingItem.quantity}, Adding: ${quantity}`); // Show limit warning
             return;
         }
-        setCart(cart.map(item => item.id === selectedProduct.id ? { ...item, quantity: newQty, totalAmount: newQty * item.sellingPrice } : item));
+        setCart(cart.map(item => item.id === selectedProduct.id ? { ...item, quantity: newQty, totalAmount: newQty * item.sellingPrice } : item)); // Update cart
     } else {
-        // Add
-        setCart([...cart, { ...selectedProduct, quantity, totalAmount: quantity * selectedProduct.sellingPrice }]);
+        // Add new item to cart
+        setCart([...cart, { ...selectedProduct, quantity, totalAmount: quantity * selectedProduct.sellingPrice }]); // Add to cart
     }
-    // Reset inputs
-    setSelectedProduct(null);
-    setProductSearch('');
-    setQuantity(1);
+    // Reset inputs after adding
+    setSelectedProduct(null);                                                 // Clear selected product
+    setProductSearch('');                                                    // Clear product search
+    setQuantity(1);                                                           // Reset quantity to 1
   };
 
   const removeFromCart = (id: number) => {
-    setCart(cart.filter(item => item.id !== id));
+    setCart(cart.filter(item => item.id !== id));                            // Remove item with matching ID from cart
   };
 
   const updateCartItemDiscount = (id: number, discount: number) => {
@@ -122,45 +123,16 @@ const Billing: React.FC = () => {
   };
 
   const downloadBillAsPDF = async (bill: Bill) => {
-    // Wait a tick for DOM to update, then capture
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    const element = printableRef.current;
-    if (!element) {
-      toast.error('Download Failed', 'Bill not ready for download.');
+    if (!settings) {
+      toast.error('Download Failed', 'Settings not loaded.');
       return;
     }
 
-    const opt = {
-      margin: 5,
-      filename: `${bill.invoiceNumber}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2 },
-      jsPDF: { orientation: 'portrait', unit: 'mm', format: 'a4' }
-    };
-
     try {
-      // Strip oklch() colors that html2pdf/html2canvas can't parse
-      const stripOklch = (el: HTMLElement) => {
-        el.querySelectorAll('*').forEach(node => {
-          const s = (node as HTMLElement).style;
-          if (s) {
-            const cs = getComputedStyle(node as HTMLElement);
-            if (cs.color?.includes('oklch')) s.color = '#1f2937';
-            if (cs.backgroundColor?.includes('oklch')) s.backgroundColor = 'transparent';
-            if (cs.borderColor?.includes('oklch')) s.borderColor = '#e5e7eb';
-          }
-        });
-      };
-      stripOklch(element);
-
-      // Generate PDF as blob
-      const pdfBlob: Blob = await html2pdf().set(opt).from(element).outputPdf('blob');
-      const arrayBuffer = await pdfBlob.arrayBuffer();
-      const pdfBytes = new Uint8Array(arrayBuffer);
+      // Generate PDF programmatically using jsPDF — no DOM rendering needed
+      const pdfBytes = generateInvoicePDF(bill, settings);
 
       try {
-        // Use Tauri native save dialog
         const { save } = await import('@tauri-apps/plugin-dialog');
         const { writeFile } = await import('@tauri-apps/plugin-fs');
         const { getInvoicesPath } = await import('../services/dataPath');
@@ -180,8 +152,8 @@ const Billing: React.FC = () => {
           toast.success('Invoice Saved', filePath);
         }
       } catch {
-        // Fallback: browser download
-        const url = URL.createObjectURL(pdfBlob);
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = `${bill.invoiceNumber}.pdf`;
@@ -226,6 +198,10 @@ const Billing: React.FC = () => {
       // Refresh list and auto-select
       const updatedList = await StorageService.getCustomers();
       setCustomers(updatedList);
+      if (updatedList.length === 0) {
+        toast.error('Error', 'Failed to retrieve customer list after save.');
+        return;
+      }
       // Find the newly added customer (highest ID)
       const added = updatedList.reduce((prev, current) => (prev.id > current.id) ? prev : current);
       
@@ -239,144 +215,150 @@ const Billing: React.FC = () => {
   // -- Calculations --
   
   const calculateBillTotals = () => {
+    // Calculate bill totals: taxable, CGST, SGST, IGST, round-off, grand total
+    // Handles both GST and non-GST bills; determines inter-state vs intra-state
     if (!settings) return { taxable: 0, tax: 0, cgst: 0, sgst: 0, igst: 0, roundOff: 0, grandTotal: 0, isInterState: false };
-    let taxable = 0;
-    let totalTax = 0;
+    let taxable = 0;                                                           // Sum of item amounts after discount
+    let totalTax = 0;                                                          // Total tax on bill
     
-    // State Code Logic
-    const companyStateCode = settings.stateCode || '19'; // Default 19 (WB)
-    let isInterState = false;
+    // State Code Logic — Determine inter-state based on customer GSTIN vs company state code
+    const companyStateCode = settings.stateCode || '19';                      // Company state code (default 19 = West Bengal)
+    let isInterState = false;                                                  // Flag for inter-state transaction
 
-    if (isGstBill && selectedCustomer?.gstin) {
-        // Extract first 2 digits of Customer GSTIN
-        const custStateCode = selectedCustomer.gstin.substring(0, 2);
+    if (isGstBill && selectedCustomer?.gstin) {                               // If GST bill and customer has GSTIN
+        // Extract first 2 digits of Customer GSTIN (customer state code)
+        const custStateCode = selectedCustomer.gstin.substring(0, 2);        // Get customer state from GSTIN
         // If Customer State Code exists and is different from Company State Code
-        if (custStateCode && custStateCode !== companyStateCode) {
-            isInterState = true;
+        if (custStateCode && custStateCode !== companyStateCode) {            // If different states
+            isInterState = true;                                              // Mark as inter-state
         }
     }
 
     cart.forEach(item => {
-        let itemAmount = item.sellingPrice * item.quantity;
+        let itemAmount = item.sellingPrice * item.quantity;                  // Base amount before discount
         // Apply discount if present
-        if (item.discount && item.discount > 0) {
-            itemAmount = itemAmount * (1 - item.discount / 100);
+        if (item.discount && item.discount > 0) {                             // If discount specified
+            itemAmount = itemAmount * (1 - item.discount / 100);              // Apply discount %
         }
-        taxable += itemAmount;
+        taxable += itemAmount;                                                // Add to taxable total
         if(isGstBill) {
-            const taxAmount = itemAmount * (item.gstRate / 100);
-            totalTax += taxAmount;
+            const taxAmount = itemAmount * (item.gstRate / 100);              // Calculate tax on item
+            totalTax += taxAmount;                                            // Add to tax total
         }
     });
     
-    let cgst = 0, sgst = 0, igst = 0;
+    let cgst = 0, sgst = 0, igst = 0;                                         // Initialize tax components
 
-    if (isGstBill) {
-        if (isInterState) {
-            igst = totalTax;
-        } else {
-            cgst = totalTax / 2;
-            sgst = totalTax / 2;
+    if (isGstBill) {                                                           // If GST bill
+        if (isInterState) {                                                   // If inter-state
+            igst = totalTax;                                                  // All tax is IGST
+        } else {                                                              // If intra-state
+            cgst = totalTax / 2;                                              // Split tax: half CGST
+            sgst = totalTax / 2;                                              // Half SGST
         }
     }
     
-    const grandTotalRaw = taxable + totalTax;
-    const roundOff = Math.round(grandTotalRaw) - grandTotalRaw;
-    const grandTotal = Math.round(grandTotalRaw);
+    const grandTotalRaw = taxable + totalTax;                                 // Sum before rounding
+    const roundOff = Math.round(grandTotalRaw) - grandTotalRaw;              // Calculate round-off amount
+    const grandTotal = Math.round(grandTotalRaw);                             // Round to nearest rupee
 
-    return { taxable, tax: totalTax, cgst, sgst, igst, roundOff, grandTotal, isInterState };
+    return { taxable, tax: totalTax, cgst, sgst, igst, roundOff, grandTotal, isInterState }; // Return all totals
   };
 
-  const totals = calculateBillTotals();
+  const totals = calculateBillTotals();                                        // Calculate bill totals whenever cart changes
 
   const handleGenerateBill = async () => {
-    if (isSaving) return;
-    if (cart.length === 0) return;
-    if (!settings) {
+    // Generate and save bill with all validation
+    if (isSaving) return;                                                      // Prevent duplicate saves
+    if (cart.length === 0) return;                                             // Require at least one item
+    if (!settings) {                                                           // Require settings loaded
         toast.warning('Not Ready', 'Settings not loaded yet. Please wait and try again.');
         return;
     }
-    if (!selectedCustomer) {
+    if (!selectedCustomer) {                                                   // Require customer selection
         toast.warning('No Customer', 'Please select a customer.');
         return;
     }
-    if (isGstBill && !selectedCustomer.gstin) {
+    if (isGstBill && !selectedCustomer.gstin) {                               // Require GSTIN for GST bills
         toast.warning('GSTIN Required', 'GST Bill requires Customer GSTIN.');
         return;
     }
 
     // Find the Sales Person in state (which includes inactive ones loaded from DB)
-    const salesPerson = salesPersons.find(sp => sp.id === selectedSalesPerson);
+    const salesPerson = salesPersons.find(sp => sp.id === selectedSalesPerson); // Lookup sales person
     
     // Strict Check: Must be valid and ACTIVE
-    if (!salesPerson) {
+    if (!salesPerson) {                                                        // Validate person exists
         toast.error('Invalid Sales Person', 'Selected Sales Person does not exist.');
         return;
     }
-    if (!salesPerson.isActive) {
+    if (!salesPerson.isActive) {                                               // Validate person is active
         toast.warning('Inactive Sales Person', 'Selected Sales Person is not active. Please select a valid one.');
         return;
     }
 
     const billItems: BillItem[] = cart.map(item => {
-        const baseAmount = item.sellingPrice * item.quantity;
-        const discount = item.discount || 0;
-        const discountedAmount = baseAmount * (1 - discount / 100);
+        // Build bill items from cart with pricing details
+        const baseAmount = item.sellingPrice * item.quantity;                 // Amount before discount
+        const discount = item.discount || 0;                                   // Discount percent
+        const discountedAmount = baseAmount * (1 - discount / 100);          // Amount after discount
         return {
-            productId: item.id,
-            productName: item.name,
-            hsnCode: item.hsnCode,
-            quantity: item.quantity,
-            mrp: item.mrp,
-            rate: item.sellingPrice,
-            amount: baseAmount,
-            discount: discount > 0 ? discount : undefined,
-            discountedAmount: discount > 0 ? discountedAmount : undefined,
-            batchNumber: item.batchNumber,
-            expiryDate: item.expiryDate || ''
+            productId: item.id,                                               // Product ID
+            productName: item.name,                                           // Product name
+            hsnCode: item.hsnCode,                                            // HSN code
+            gstRate: item.gstRate || 0,                                       // GST rate for per-item tax calc
+            quantity: item.quantity,                                          // Quantity
+            mrp: item.mrp,                                                    // MRP
+            rate: item.sellingPrice,                                          // Selling price
+            amount: baseAmount,                                               // Amount before discount
+            discount: discount > 0 ? discount : undefined,                    // Discount if applicable
+            discountedAmount: discount > 0 ? discountedAmount : undefined,   // Discounted amount if applicable
+            batchNumber: item.batchNumber,                                    // Batch number
+            expiryDate: item.expiryDate || ''                                 // Expiry date
         };
     });
 
-    setIsSaving(true);
+    setIsSaving(true);                                                         // Set loading state
     try {
-      const invoiceNumber = await StorageService.getNextInvoiceNumber();
+      const invoiceNumber = await StorageService.getNextInvoiceNumber(isGstBill); // Get next invoice number (GST or non-GST prefix)
       const newBill: Bill = {
-        id: 0,
-        invoiceNumber,
-        date: new Date().toISOString(),
-        customerId: selectedCustomer.id,
-        customerName: selectedCustomer.name,
-        customerPhone: selectedCustomer.phone,
-        customerAddress: selectedCustomer.address,
-        customerGstin: selectedCustomer.gstin,
-        salesPersonId: selectedSalesPerson,
-        salesPersonName: salesPerson.name,
-        isGstBill,
-        subTotal: totals.taxable,
-        taxableAmount: totals.taxable,
-        cgstAmount: totals.cgst,
-        sgstAmount: totals.sgst,
-        igstAmount: totals.igst,
-        totalTax: totals.tax,
-        roundOff: totals.roundOff,
-        grandTotal: totals.grandTotal,
-        items: billItems
+        // Build complete bill object for database
+        id: 0,                                                                // Auto-assigned by DB
+        invoiceNumber,                                                        // Invoice number
+        date: new Date().toISOString(),                                       // Current timestamp
+        customerId: selectedCustomer.id,                                      // Customer ID
+        customerName: selectedCustomer.name,                                  // Customer name
+        customerPhone: selectedCustomer.phone,                                // Customer phone
+        customerAddress: selectedCustomer.address,                            // Customer address
+        customerGstin: selectedCustomer.gstin,                                // Customer GSTIN
+        salesPersonId: selectedSalesPerson,                                   // Sales person ID
+        salesPersonName: salesPerson.name,                                    // Sales person name
+        isGstBill,                                                            // GST flag
+        subTotal: totals.taxable,                                            // Subtotal
+        taxableAmount: totals.taxable,                                        // Taxable amount
+        cgstAmount: totals.cgst,                                              // CGST
+        sgstAmount: totals.sgst,                                              // SGST
+        igstAmount: totals.igst,                                              // IGST
+        totalTax: totals.tax,                                                 // Total tax
+        roundOff: totals.roundOff,                                            // Round-off amount
+        grandTotal: totals.grandTotal,                                        // Grand total
+        items: billItems                                                      // Line items
       };
 
-      await StorageService.saveBill(newBill);
-      setLastBill(newBill);
-      // Clear cart
-      setCart([]);
-      setSelectedCustomer(null);
-      setCustomerSearch('');
+      await StorageService.saveBill(newBill);                                 // Save bill to database
+      setLastBill(newBill);                                                   // Store for post-save actions
+      // Clear cart and reset form
+      setCart([]);                                                             // Clear cart
+      setSelectedCustomer(null);                                              // Clear customer
+      setCustomerSearch('');                                                  // Clear search
       // Refresh products to update stock
-      const updatedProducts = await StorageService.getProducts();
-      setProducts(updatedProducts);
+      const updatedProducts = await StorageService.getProducts();             // Reload products
+      setProducts(updatedProducts);                                           // Update state
     } catch (err) {
-      console.error('Error generating bill:', err);
-      toast.error('Bill Failed', 'Failed to save bill. Please try again.');
+      console.error('Error generating bill:', err);                            // Log error
+      toast.error('Bill Failed', 'Failed to save bill. Please try again.');    // Show error toast
     } finally {
-      setIsSaving(false);
+      setIsSaving(false);                                                      // Clear loading state
     }
   };
 
@@ -395,7 +377,7 @@ const Billing: React.FC = () => {
           ];
 
       return (
-          <div ref={printableRef} id="printable-area" className="p-8 bg-white text-gray-800 text-sm font-sans relative min-h-[1000px] flex flex-col">
+          <div ref={printableRef} id="printable-area" className="p-8 bg-white text-gray-800 text-sm font-sans relative flex flex-col">
             {/* Header */}
             <div className="flex justify-between items-start border-b-2 border-gray-800 pb-4 mb-4">
                 <div className="flex gap-4">
@@ -892,7 +874,47 @@ const Billing: React.FC = () => {
                     </h3>
                     <div className="flex items-center gap-3">
                         <button 
-                            onClick={() => window.print()} 
+                            onClick={() => {
+                              if (!lastBill || !settings) return;
+                              // Generate PDF and print it via iframe
+                              try {
+                                const pdfBlob = generateInvoicePDFBlob(lastBill, settings);
+                                const url = URL.createObjectURL(pdfBlob);
+                                const iframe = document.createElement('iframe');
+                                iframe.style.cssText = 'position:fixed;left:0;top:0;width:100%;height:100%;border:none;z-index:99999;opacity:0.01;';
+                                iframe.src = url;
+                                document.body.appendChild(iframe);
+                                iframe.onload = () => {
+                                  setTimeout(() => {
+                                    try {
+                                      iframe.contentWindow?.focus();
+                                      iframe.contentWindow?.print();
+                                    } catch (e) {
+                                      console.error('Print failed:', e);
+                                      window.open(url, '_blank');
+                                    }
+                                    setTimeout(() => {
+                                      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                                      URL.revokeObjectURL(url);
+                                    }, 5000);
+                                  }, 800);
+                                };
+                                setTimeout(() => {
+                                  if (iframe.parentNode) {
+                                    try {
+                                      iframe.contentWindow?.focus();
+                                      iframe.contentWindow?.print();
+                                    } catch { window.open(url, '_blank'); }
+                                    setTimeout(() => {
+                                      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                                      URL.revokeObjectURL(url);
+                                    }, 5000);
+                                  }
+                                }, 3000);
+                              } catch (err) {
+                                console.error('Print failed:', err);
+                              }
+                            }} 
                             className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
                         >
                             <Printer size={18} className="mr-2" /> Print / Save PDF
