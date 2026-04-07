@@ -36,7 +36,6 @@ async function initializeApp() {
     root.render(
       // Wrap the App component in React.StrictMode to highlight potential issues
       <React.StrictMode>
-        // Render the main App component
         <App />
       </React.StrictMode>
     );
