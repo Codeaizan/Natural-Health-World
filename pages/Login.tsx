@@ -12,6 +12,9 @@ interface LoginProps {
 // Login page component — handles username/password form, brute-force lockout, and audit logging
 // SHA-256 hash of the default 'admin123' password — used to detect if password was never changed
 const DEFAULT_ADMIN_HASH = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
+// Owner-only master code for emergency password reset flow.
+// Replace this value with your private code before shipping.
+const OWNER_PASSWORD_RESET_CODE = '4632Addu';
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');               // Controlled input value for the username field
@@ -25,6 +28,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+  // Owner reset flow state — allows password recovery without deleting any data
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotUsername, setForgotUsername] = useState('');
+  const [secretCode, setSecretCode] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const MAX_ATTEMPTS = 5;                          // Number of consecutive failures before the account is locked
   const LOCKOUT_DURATION_MS = 2 * 60 * 1000;      // Lockout duration = 2 minutes in milliseconds
@@ -48,6 +59,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const handleSubmit = async (e: React.FormEvent) => { // Form submit handler — async because credential verification may hit a SQLite DB
     e.preventDefault(); // Prevent the default browser form submission (page reload)
     setError('');        // Clear any previous error message before a new attempt
+    setSuccessMessage('');
 
     // Lockout check
     if (isLockedOut) { // Reject immediately if still within the lockout window
@@ -98,6 +110,86 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         setError('Login failed. Please try again.');   // Generic error message for the user
     } finally {
         setLoading(false); // Always hide the spinner when the async operation completes (success or failure)
+    }
+  };
+
+  // Open owner reset flow
+  const handleOpenForgotPassword = () => {
+    setError('');
+    setSuccessMessage('');
+    setShowForgotPassword(true);
+  };
+
+  // Return to normal login form and clear reset inputs
+  const handleBackToLogin = () => {
+    setError('');
+    setShowForgotPassword(false);
+    setForgotUsername('');
+    setSecretCode('');
+    setForgotNewPassword('');
+    setForgotConfirmPassword('');
+  };
+
+  // Owner-protected password reset flow (password only; does not delete any app data)
+  const handleForgotPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccessMessage('');
+
+    const targetUsername = forgotUsername.trim();
+    const enteredCode = secretCode.trim();
+
+    if (!targetUsername) {
+      setError('Please enter the username to reset.');
+      return;
+    }
+    if (!enteredCode) {
+      setError('Please enter the secret owner code.');
+      return;
+    }
+    if (forgotNewPassword.length < 6) {
+      setError('New password must be at least 6 characters.');
+      return;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    if (enteredCode !== OWNER_PASSWORD_RESET_CODE) {
+      AuditLogService.log('auth', 'Password Reset Failed', `Invalid secret reset code used for username "${targetUsername}"`);
+      setError('Invalid secret code. Please contact the application owner.');
+      return;
+    }
+
+    setResettingPassword(true);
+
+    try {
+      const users = await StorageService.getUsers();
+      const existingUser = users.find((u) => u.username === targetUsername);
+
+      if (!existingUser) {
+        setError('User not found.');
+        return;
+      }
+
+      const hash = await StorageService.hashPassword(forgotNewPassword);
+      await StorageService.saveUser({ ...existingUser, passwordHash: hash });
+      AuditLogService.log('auth', 'Password Reset', `Password reset completed for username "${targetUsername}" via owner secret code`);
+
+      // Unlock login so the user can sign in immediately with the new password.
+      setAttempts(0);
+      setLockoutUntil(null);
+      setUsername(targetUsername);
+      setPassword('');
+
+      handleBackToLogin();
+      setSuccessMessage('Password reset successful. Data is unchanged. Please log in with the new password.');
+    } catch (err) {
+      console.error('Forgot password reset error:', err);
+      setError('Failed to reset password. Please try again.');
+    } finally {
+      setResettingPassword(false);
     }
   };
 
@@ -152,7 +244,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             Natural Health World
           </h1>
           <p className="text-gray-500">
-            {mustChangePassword ? 'Please set a new password to continue' : 'Sign in to access the system'}
+            {mustChangePassword ? 'Please set a new password to continue' : showForgotPassword ? 'Owner-assisted password recovery' : 'Sign in to access the system'}
           </p>
         </div>
 
@@ -198,6 +290,84 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               {changingPassword ? <Loader2 className="animate-spin" /> : 'Set New Password & Login'}
             </button>
           </form>
+        ) : showForgotPassword ? (
+          <form onSubmit={handleForgotPasswordReset} className="space-y-6" noValidate>
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800">
+              Enter your username, the owner secret code, and a new password. This updates only the login password and does not delete your billing, customer, or inventory data.
+            </div>
+            <p className="text-xs text-gray-500 text-center">
+              Need assisted recovery? Contact Admin.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+              <input
+                type="text"
+                value={forgotUsername}
+                onChange={(e) => setForgotUsername(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all"
+                style={{ '--tw-ring-color': COLORS.sageGreen } as React.CSSProperties}
+                placeholder="Enter username"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Secret Owner Code</label>
+              <input
+                type="password"
+                value={secretCode}
+                onChange={(e) => setSecretCode(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all"
+                style={{ '--tw-ring-color': COLORS.sageGreen } as React.CSSProperties}
+                placeholder="Enter secret code"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+              <input
+                type="password"
+                value={forgotNewPassword}
+                onChange={(e) => setForgotNewPassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all"
+                style={{ '--tw-ring-color': COLORS.sageGreen } as React.CSSProperties}
+                placeholder="Enter new password"
+                minLength={6}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+              <input
+                type="password"
+                value={forgotConfirmPassword}
+                onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-opacity-50 focus:outline-none transition-all"
+                style={{ '--tw-ring-color': COLORS.sageGreen } as React.CSSProperties}
+                placeholder="Re-enter new password"
+                minLength={6}
+              />
+            </div>
+
+            {error && (
+              <div className="text-red-500 text-sm text-center bg-red-50 p-2 rounded">{error}</div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleBackToLogin}
+                className="w-1/2 py-3 rounded-lg font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 transition-all"
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                disabled={resettingPassword}
+                className="w-1/2 py-3 rounded-lg text-white font-semibold shadow-md hover:shadow-lg transition-all transform active:scale-95 flex justify-center items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: COLORS.mediumGreen }}
+              >
+                {resettingPassword ? <Loader2 className="animate-spin" /> : 'Reset Password'}
+              </button>
+            </div>
+          </form>
         ) : (
         <form onSubmit={handleSubmit} className="space-y-6" noValidate> {/* Login form; noValidate disables browser built-in validation so we control errors */}
           <div> {/* Username field group */}
@@ -237,6 +407,12 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             </div>
           )}
 
+          {successMessage && (
+            <div className="text-green-700 text-sm text-center bg-green-50 p-2 rounded">
+              {successMessage}
+            </div>
+          )}
+
           <button
             type="submit"                      // Submit the form when clicked
             disabled={loading || !isFormValid || isLockedOut} // Disable during loading, invalid input, or lockout
@@ -244,6 +420,14 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             style={{ backgroundColor: COLORS.mediumGreen }} // Brand medium green background
           >
             {loading ? <Loader2 className="animate-spin" /> : isLockedOut ? 'Locked' : 'Login'} {/* Spinner while loading, "Locked" text during lockout, "Login" otherwise */}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenForgotPassword}
+            className="w-full text-sm font-medium underline text-gray-600 hover:text-gray-800 transition-colors"
+          >
+            Forgot Password?
           </button>
         </form>
         )}
