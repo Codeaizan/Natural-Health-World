@@ -38,6 +38,8 @@ import { ToastProvider, useToast } from './components/Toast';
 import { AuditLogService } from './services/auditLog';
 // Import StorageService for data persistence
 import { StorageService } from './services/storage';
+// Import UpdateChecker component for auto-update functionality
+import UpdateChecker from './components/UpdateChecker';
 // Import setup check functions from data path service
 import { isFirstRunComplete, setDataPath, ensureDataFolders } from './services/dataPath';
 
@@ -247,13 +249,16 @@ const App: React.FC = () => {
 
   // Render main application with Layout wrapper and dynamic page content
   return (
-    <Layout 
-      activeTab={activeTab} 
-      onTabChange={setActiveTab} 
-      onLogout={handleLogout}
-    >
-      {renderContent()}
-    </Layout>
+    <>
+      <UpdateChecker />
+      <Layout 
+        activeTab={activeTab} 
+        onTabChange={setActiveTab} 
+        onLogout={handleLogout}
+      >
+        {renderContent()}
+      </Layout>
+    </>
   );
 };
 

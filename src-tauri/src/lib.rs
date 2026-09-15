@@ -106,6 +106,8 @@ pub fn run() {
   // Build and configure the Tauri application, register all plugins, then start the event loop
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())  // Register the file/folder picker and message dialog plugin
+    .plugin(tauri_plugin_updater::Builder::new().build())  // Register the auto-updater plugin (checks GitHub Releases for new versions)
+    .plugin(tauri_plugin_process::init())  // Register the process plugin (enables app restart after update)
     .plugin(tauri_plugin_fs::init())      // Register the filesystem read/write plugin (copy, mkdir, exists, etc.)
     .plugin(
       // Register the SQLite plugin; supply the migrations so the schema is created on first launch
