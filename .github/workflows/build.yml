@@ -2,15 +2,102 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Auto-increment version, update config files, push tag
+  # ──────────────────────────────────────────────────────────
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      new_tag: ${{ steps.bump.outputs.new_tag }}
+      should_release: ${{ steps.bump.outputs.should_release }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0              # Full history needed to find latest tag
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine next version
+        id: bump
+        run: |
+          # Get the latest semver tag (e.g. v1.1.2)
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
+
+          echo "Latest tag: $LATEST_TAG"
+
+          # Strip 'v' prefix → 1.1.2
+          VERSION="${LATEST_TAG#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          PATCH=$(echo "$VERSION" | cut -d. -f3)
+
+          # Auto-increment patch version → 1.1.3
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          NEW_TAG="v${NEW_VERSION}"
+
+          # Check if this tag already exists (avoid duplicate releases)
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Tag $NEW_TAG already exists — skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          echo "New version: $NEW_VERSION ($NEW_TAG)"
+
+      - name: Update version in config files
+        if: steps.bump.outputs.should_release == 'true'
+        run: |
+          NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+
+          # Update tauri.conf.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" src-tauri/tauri.conf.json
+
+          # Update Cargo.toml (only the package version, not dependency versions)
+          sed -i "0,/^version = \"[^\"]*\"/s//version = \"$NEW_VERSION\"/" src-tauri/Cargo.toml
+
+          # Update package.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$NEW_VERSION\"/" package.json
+
+          echo "Updated all config files to version $NEW_VERSION"
+
+      - name: Commit version bump and create tag
+        if: steps.bump.outputs.should_release == 'true'
+        run: |
+          NEW_TAG="${{ steps.bump.outputs.new_tag }}"
+          NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+          # Only commit if there are changes (version might already be correct)
+          git diff --staged --quiet || git commit -m "chore: bump version to ${NEW_VERSION} [skip ci]"
+          git tag "$NEW_TAG"
+          git push origin main --tags
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Build Tauri app for all platforms
+  # ──────────────────────────────────────────────────────────
   build:
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +116,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.new_tag }}
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
@@ -59,11 +148,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Natural Health World v__VERSION__'
-          releaseBody: 'Download the installer for your platform below.'
+          tagName: ${{ needs.version.outputs.new_tag }}
+          releaseName: 'Natural Health World ${{ needs.version.outputs.new_tag }}'
+          releaseBody: 'Automatic release — download the installer for your platform below.'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
