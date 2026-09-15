@@ -14,7 +14,7 @@ interface LoginProps {
 const DEFAULT_ADMIN_HASH = '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9';
 // Owner-only master code for emergency password reset flow.
 // Replace this value with your private code before shipping.
-const OWNER_PASSWORD_RESET_CODE = '4632Addu';
+const OWNER_PASSWORD_RESET_CODE = '46324632';
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');               // Controlled input value for the username field
@@ -422,14 +422,19 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
             {loading ? <Loader2 className="animate-spin" /> : isLockedOut ? 'Locked' : 'Login'} {/* Spinner while loading, "Locked" text during lockout, "Login" otherwise */}
           </button>
 
+        </form>
+        )}
+
+        {/* Forgot Password link — always visible outside the form, even during lockout */}
+        {!mustChangePassword && !showForgotPassword && (
           <button
             type="button"
             onClick={handleOpenForgotPassword}
-            className="w-full text-sm font-medium underline text-gray-600 hover:text-gray-800 transition-colors"
+            className="w-full mt-4 py-2 text-sm font-semibold underline transition-colors"
+            style={{ color: COLORS.mediumGreen }}
           >
-            Forgot Password?
+            Forgot Password? Click here to reset
           </button>
-        </form>
         )}
       </div>
     </div>
